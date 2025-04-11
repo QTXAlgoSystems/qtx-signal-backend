@@ -60,6 +60,10 @@ app.get("/api/latest-signals", (req, res) => {
   // Convert signals object to an array
   const signalArray = Object.values(signals);
 
+  // Debug log to check if signals is an array and how many elements it has
+  console.log("Signals Array Length:", signalArray.length);
+  console.log("Signals Array Data:", signalArray);
+
   // If it's not an array, return an error response
   if (!Array.isArray(signalArray)) {
     return res.status(500).json({ error: "Signals is not an array" });
