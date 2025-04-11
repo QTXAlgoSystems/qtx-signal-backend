@@ -1,27 +1,24 @@
 const express = require("express");
-const cors = require("cors");
-
 const app = express();
 const PORT = process.env.PORT;
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
-// ✅ Correct CORS for production
-app.use(cors({
-  origin: "https://qtxalgosystems.com",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+const ALLOWED_ORIGIN = "https://qtxalgosystems.com";
+
+// ✅ Custom CORS middleware for ALL responses
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  next();
+});
 
 app.use(express.json());
 
-// ✅ Handle preflight requests explicitly
-app.options("*", cors({
-  origin: "https://qtxalgosystems.com",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+// ✅ Handle preflight OPTIONS request
+app.options("*", (req, res) => {
+  res.sendStatus(204);
+});
 
 let signals = {};
 
