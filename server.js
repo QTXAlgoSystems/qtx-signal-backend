@@ -1,20 +1,19 @@
-// force redeploy - render bug patch
 const express = require("express");
 const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT; 
+const PORT = process.env.PORT;
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
-// ✅ Explicit CORS config to allow frontend requests from your domain
+// ✅ Secure CORS setup for your frontend
 const corsOptions = {
-  origin: "https://qtxalgosystems.com", // your live domain
+  origin: "https://qtxalgosystems.com", // exact domain including https
   methods: ["GET", "POST"],
-  optionsSuccessStatus: 200
+  credentials: true, // future-proof for auth
 };
 
 app.use(cors(corsOptions));
-app.use(express.json()); // modern JSON parser
+app.use(express.json());
 
 let signals = {};
 
@@ -44,5 +43,5 @@ app.get("/api/latest-signals", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
