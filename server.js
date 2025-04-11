@@ -1,13 +1,12 @@
 const express = require("express");
 const cors = require("cors");
-const bodyParser = require("body-parser");
 
 const app = express();
 const PORT = process.env.PORT; 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json()); // replaces body-parser for modern Express
 
 let signals = {};
 
