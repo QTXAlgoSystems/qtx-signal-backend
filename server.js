@@ -6,7 +6,9 @@ const app = express();
 const PORT = process.env.PORT; 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
-app.use(cors());
+app.use(cors({
+  origin: "https://qtxalgosystems.com"
+}));
 app.use(express.json()); // replaces body-parser for modern Express
 
 let signals = {};
