@@ -55,15 +55,17 @@ app.post("/webhook", (req, res) => {
   res.json({ success: true });
 });
 
-
-
 // ✅ Route to fetch latest signals and sort them based on score
 app.get("/api/latest-signals", (req, res) => {
-  // Check that signals is an array and sort it
-  const sorted = Object.values(signals).sort((a, b) => b.totalScore - a.totalScore); 
-  res.json(sorted); // Return an array of sorted signals
+  // Ensure signals is an array, sort it by highest totalScore
+  const signalArray = Object.values(signals); // This should be an array
+  if (!Array.isArray(signalArray)) {
+    return res.status(500).json({ error: "Signals is not an array" });
+  }
+  
+  const sorted = signalArray.sort((a, b) => b.totalScore - a.totalScore); // Sort by highest score
+  res.json(sorted); // Return the array of sorted signals
 });
-
 
 // Start the server and listen on the specified port
 app.listen(PORT, () => {
