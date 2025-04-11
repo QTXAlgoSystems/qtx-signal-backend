@@ -6,10 +6,15 @@ const app = express();
 const PORT = process.env.PORT; 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
-app.use(cors({
-  origin: "https://qtxalgosystems.com"
-}));
-app.use(express.json()); // replaces body-parser for modern Express
+// ✅ Explicit CORS config to allow frontend requests from your domain
+const corsOptions = {
+  origin: "https://qtxalgosystems.com", // your live domain
+  methods: ["GET", "POST"],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.use(express.json()); // modern JSON parser
 
 let signals = {};
 
