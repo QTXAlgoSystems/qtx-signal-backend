@@ -1,32 +1,3 @@
-const express = require("express");
-const app = express();
-const PORT = process.env.PORT || 3000; // Default port 3000 if not provided 
-const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
-
-const ALLOWED_ORIGIN = "https://qtxalgosystems.com"; // Frontend domain
-
-// ✅ CORS configuration middleware for allowing requests from your frontend domain
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  next();
-});
-
-app.use(express.json()); // Middleware to parse JSON bodies
-
-// ✅ Handle preflight OPTIONS request for CORS
-app.options("*", (req, res) => {
-  res.sendStatus(204); // Respond with no content to OPTIONS requests
-});
-
-let signals = {};
-
-// Helper function to create unique keys for each symbol and timeframe combination
-function getKey(symbol, timeframe) {
-  return `${symbol}-${timeframe}`;
-}
-
 // ✅ Webhook route to receive TradingView alert data
 app.post("/webhook", (req, res) => {
   const token = req.query.token;  // Validate the token sent in the query string
@@ -48,6 +19,11 @@ app.post("/webhook", (req, res) => {
 
   const key = getKey(payload.symbol, payload.timeframe);
 
+  // Ensure signals is an array and then save/update the signal
+  if (!Array.isArray(signals)) {
+    signals = [];  // Initialize as an array if it's not one
+  }
+
   // Save the signal data or update it if it already exists
   signals[key] = { ...signals[key], ...payload };
 
@@ -65,9 +41,4 @@ app.get("/api/latest-signals", (req, res) => {
   
   const sorted = signalArray.sort((a, b) => b.totalScore - a.totalScore); // Sort by highest score
   res.json(sorted); // Return the array of sorted signals
-});
-
-// Start the server and listen on the specified port
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
 });
