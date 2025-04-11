@@ -1,3 +1,8 @@
+// ✅ Import express and create an app instance
+const express = require("express");
+const app = express();
+const PORT = process.env.PORT || 3000; // Default port 3000 if not provided
+
 // ✅ Webhook route to receive TradingView alert data
 app.post("/webhook", (req, res) => {
   const token = req.query.token;  // Validate the token sent in the query string
