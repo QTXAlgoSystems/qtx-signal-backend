@@ -27,29 +27,34 @@ function getKey(symbol, timeframe) {
   return `${symbol}-${timeframe}`;
 }
 
+// ✅ Webhook route to receive TradingView alert data
 app.post("/webhook", (req, res) => {
-  const token = req.query.token;
+  const token = req.query.token;  // Validate the token sent in the query string
 
+  // Validate webhook token for security
   if (token !== WEBHOOK_TOKEN) {
     return res.status(403).json({ error: "Invalid token" });
   }
 
   const payload = req.body;
 
+  // Log the received payload to verify the data
+  console.log("Received Payload:", payload);
+
+  // Check if the essential fields are present in the payload
   if (!payload.symbol || !payload.timeframe) {
     return res.status(400).json({ error: "Missing required fields (symbol, timeframe)" });
   }
 
   const key = getKey(payload.symbol, payload.timeframe);
-  
+
   // Save the signal data or update it if it already exists
   signals[key] = { ...signals[key], ...payload };
 
-  // Add log to confirm that the signals object is being updated correctly
-  console.log("Signals Object:", signals); // Debug log to check signals state
-
+  // Respond with success
   res.json({ success: true });
 });
+
 
 
 // ✅ Route to fetch latest signals and sort them based on score
