@@ -29,7 +29,7 @@ function getKey(symbol, timeframe) {
 
 // ✅ Webhook route to receive TradingView alert data
 app.post("/webhook", (req, res) => {
-  const token = req.query.token;
+  const token = req.query.token;  // Validate the token sent in the query string
 
   // Validate webhook token for security
   if (token !== WEBHOOK_TOKEN) {
