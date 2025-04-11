@@ -3,7 +3,7 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
 app.use(cors());
