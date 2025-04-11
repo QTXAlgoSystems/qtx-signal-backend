@@ -54,9 +54,11 @@ app.post("/webhook", (req, res) => {
 
 // ✅ Route to fetch latest signals and sort them based on score
 app.get("/api/latest-signals", (req, res) => {
-  const sorted = Object.values(signals).sort((a, b) => b.totalScore - a.totalScore); // Sort by highest score
-  res.json(sorted); // Send sorted signals as JSON response
+  // Check that signals is an array and sort it
+  const sorted = Object.values(signals).sort((a, b) => b.totalScore - a.totalScore); 
+  res.json(sorted); // Return an array of sorted signals
 });
+
 
 // Start the server and listen on the specified port
 app.listen(PORT, () => {
