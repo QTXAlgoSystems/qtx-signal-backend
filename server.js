@@ -1,6 +1,6 @@
 const express = require("express");
 const app = express();
-const PORT = process.env.PORT || 3000; // Default port 3000 if not provided
+const PORT = process.env.PORT || 3000; // Default port 3000 if not provided 
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
 const ALLOWED_ORIGIN = "https://qtxalgosystems.com"; // Frontend domain
