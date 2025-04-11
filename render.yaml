@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: qtx-signal-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: WEBHOOK_TOKEN
+        value: g0dXc0mpl3x_94NsY
