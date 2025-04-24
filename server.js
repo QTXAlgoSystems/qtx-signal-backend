@@ -40,6 +40,7 @@ app.post("/webhook", (req, res) => {
 
   const id = getKey(payload.id);
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
+  console.log("🧠 Current signal keys:", Array.from(signals.keys()));
 
   if (isEntry) {
   // Auto-close opposite trades on same symbol AND same timeframe
