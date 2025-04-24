@@ -42,19 +42,20 @@ app.post("/webhook", (req, res) => {
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
 
   if (isEntry) {
-    // Auto-close opposite trades
-    for (const [key, sig] of signals.entries()) {
-      const isSameSymbol = sig.symbol === payload.symbol;
-      const isOpposite = sig.direction !== payload.direction;
-      const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
+  // Auto-close opposite trades on same symbol AND same timeframe
+  for (const [key, sig] of signals.entries()) {
+    const isSameSymbol = sig.symbol === payload.symbol;
+    const isSameTimeframe = sig.timeframe === payload.timeframe;
+    const isOpposite = sig.direction !== payload.direction;
+    const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
 
-      if (isSameSymbol && isOpposite && notClosed) {
-        sig.tp1Hit = true;
-        sig.tp2Hit = true;
-        sig.closedAt = payload.timestamp;
-        console.log(`🔁 Auto-closed: ${key}`);
-      }
+    if (isSameSymbol && isSameTimeframe && isOpposite && notClosed) {
+      sig.tp1Hit = true;
+      sig.tp2Hit = true;
+      sig.closedAt = payload.timestamp;
+      console.log(`🔁 Auto-closed: ${key}`);
     }
+  }
 
     // Skip Add trades (same ID already exists)
     if (signals.has(id)) {
