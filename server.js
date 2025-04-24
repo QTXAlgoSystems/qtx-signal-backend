@@ -73,16 +73,27 @@ app.post("/webhook", (req, res) => {
     console.warn(`⚠️ Unknown trade ID: ${id}`);
     return res.status(404).json({ error: "Trade not found" });
   }
-
+  
   if (payload.tp1Hit) existing.tp1Hit = true;
   if (payload.tp2Hit) existing.tp2Hit = true;
-  if (payload.slHit) existing.slHit = true;
-  if (payload.closedAt) existing.closedAt = payload.closedAt;
-
+  
+  if (payload.slHit) {
+    existing.slHit = true;
+    existing.closedAt = payload.closedAt || new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+  }
+  
+  // Automatically close trade when TP1 + TP2 or SL are hit
+  const hasFullyClosed =
+    (existing.tp1Hit && existing.tp2Hit) || existing.slHit;
+  
+  if (hasFullyClosed && !existing.closedAt) {
+    existing.closedAt = payload.closedAt || new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+    console.log(`✅ Trade closed (TP1 + TP2 or SL): ${id}`);
+  }
+  
   console.log(`🔄 Trade updated: ${id}`);
   return res.json({ success: true });
-});
-
+}); 
 
 // ✅ Route to fetch latest signals and sort them based on score
 app.get("/api/latest-signals", (req, res) => {
