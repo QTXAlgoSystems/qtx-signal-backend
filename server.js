@@ -1,11 +1,10 @@
 const express = require("express");
 const app = express();
-const PORT = process.env.PORT || 3000; // Use the environment port
+const PORT = process.env.PORT || 3000;
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
-const ALLOWED_ORIGIN = "https://qtxalgosystems.com"; // Frontend domain
+const ALLOWED_ORIGIN = "https://qtxalgosystems.com";
 
-// ✅ CORS configuration middleware for allowing requests from your frontend domain
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -13,22 +12,20 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json()); // Middleware to parse JSON bodies
-
-// ✅ Handle preflight OPTIONS request for CORS
-app.options("*", (req, res) => {
-  res.sendStatus(204); // Respond with no content to OPTIONS requests
-});
+app.use(express.json());
+app.options("*", (req, res) => res.sendStatus(204));
 
 const signals = new Map();
 
-// Helper function to create unique keys for each symbol and timeframe combination
-function getKey(id) {
-  return id?.trim() || "unknown-id";
+// Build a unique key: use non‐empty id, else symbol_timestamp
+function getKey(payload) {
+  const id = payload.id?.trim();
+  const ts = payload.timestamp || new Date().toISOString();
+  return id && id.length
+    ? id
+    : `${payload.symbol}_${ts}`;
 }
 
-
-// ✅ Webhook route to receive TradingView alert data
 app.post("/webhook", (req, res) => {
   const token = req.query.token;
   if (token !== WEBHOOK_TOKEN) {
@@ -38,27 +35,32 @@ app.post("/webhook", (req, res) => {
   const payload = req.body;
   console.log("📩 Webhook Payload:", payload);
 
-  const id = getKey(payload.id);
+  // ensure entry timestamp exists
+  if (!payload.timestamp) {
+    payload.timestamp = new Date().toISOString();
+  }
+
+  const id = getKey(payload);
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
   console.log("🧠 Current signal keys:", Array.from(signals.keys()));
 
   if (isEntry) {
-  // Auto-close opposite trades on same symbol AND same timeframe
-  for (const [key, sig] of signals.entries()) {
-    const isSameSymbol = sig.symbol === payload.symbol;
-    const isSameTimeframe = sig.timeframe === payload.timeframe;
-    const isOpposite = sig.direction !== payload.direction;
-    const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
+    // auto-close opposite trades on same symbol+timeframe
+    for (const [key, sig] of signals.entries()) {
+      const sameSym  = sig.symbol === payload.symbol;
+      const sameTF   = sig.timeframe === payload.timeframe;
+      const opposite = sig.direction !== payload.direction;
+      const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
 
-    if (isSameSymbol && isSameTimeframe && isOpposite && notClosed) {
-      sig.tp1Hit = true;
-      sig.tp2Hit = true;
-      sig.closedAt = payload.timestamp;
-      console.log(`🔁 Auto-closed: ${key}`);
+      if (sameSym && sameTF && opposite && notClosed) {
+        sig.tp1Hit   = true;
+        sig.tp2Hit   = true;
+        sig.closedAt = payload.timestamp;
+        console.log(`🔁 Auto-closed: ${key}`);
+      }
     }
-  }
 
-    // Skip Add trades (same ID already exists)
+    // skip duplicate “Add” trades
     if (signals.has(id)) {
       console.log(`⚠️ Add trade skipped: ${id}`);
       return res.json({ success: true, message: "Add trade skipped" });
@@ -69,43 +71,38 @@ app.post("/webhook", (req, res) => {
     return res.json({ success: true });
   }
 
-  // Update logic for TP1, TP2, SL
+  // --- updates: TP1 / TP2 / SL ---
   const existing = signals.get(id);
   if (!existing) {
     console.warn(`⚠️ Unknown trade ID: ${id}`);
     return res.status(404).json({ error: "Trade not found" });
   }
-  
+
   if (payload.tp1Hit) existing.tp1Hit = true;
   if (payload.tp2Hit) existing.tp2Hit = true;
-  
+
   if (payload.slHit) {
-    existing.slHit = true;
-    existing.closedAt = payload.closedAt || new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+    existing.slHit    = true;
+    existing.closedAt = payload.timestamp;
   }
-  
-  // Automatically close trade when TP1 + TP2 or SL are hit
-  const hasFullyClosed =
-    (existing.tp1Hit && existing.tp2Hit) || existing.slHit;
-  
-  if (hasFullyClosed && !existing.closedAt) {
-    existing.closedAt = payload.closedAt || new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
-    console.log(`✅ Trade closed (TP1 + TP2 or SL): ${id}`);
+
+  // ensure we set closedAt once fully closed
+  const fullyClosed = (existing.tp1Hit && existing.tp2Hit) || existing.slHit;
+  if (fullyClosed && !existing.closedAt) {
+    existing.closedAt = payload.timestamp;
+    console.log(`✅ Trade closed: ${id}`);
   }
-  
+
   console.log(`🔄 Trade updated: ${id}`);
   return res.json({ success: true });
-}); 
+});
 
-// ✅ Route to fetch latest signals and sort them based on score
 app.get("/api/latest-signals", (req, res) => {
   const signalArray = Array.from(signals.values());
   console.log("📤 Returning", signalArray.length, "signals");
   res.json(signalArray);
 });
 
-
-// Start the server and listen on the specified port
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
