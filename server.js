@@ -54,22 +54,27 @@ app.post("/webhook", (req, res) => {
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
   console.log("🧠 Current signal keys:", Array.from(signals.keys()));
 
-  if (isEntry) {
-    // auto-close opposite trades on same symbol+timeframe
-    for (const [key, sig] of signals.entries()) {
-      const sameSym  = sig.symbol === payload.symbol;
-      const sameTF   = sig.timeframe === payload.timeframe;
-      const opposite = sig.direction !== payload.direction;
-      const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
-
-      if (sameSym && sameTF && opposite && notClosed) {
-        sig.tp1Hit   = true;
-        sig.tp2Hit   = true;
-        sig.closedAt = payload.timestamp;
-        console.log(`🔁 Auto-closed: ${key}`);
-      }
+  // ── auto-close opposite trades on the *same* instrument ──
+  function splitId(id) {
+    const [sym, tf] = id.split("_");
+    return { sym, tf };
+  }
+  
+  const { sym: newSym, tf: newTF } = splitId(id);
+  for (const [key, sig] of signals.entries()) {
+    const { sym, tf } = splitId(key);
+    const opposite  = sig.direction !== payload.direction;
+    const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
+  
+    // only if symbol and timeframe match exactly
+    if (sym === newSym && tf === newTF && opposite && notClosed) {
+      sig.tp1Hit   = true;
+      sig.tp2Hit   = true;
+      sig.closedAt = payload.timestamp;
+      console.log(`🔁 Auto-closed: ${key}`);
     }
-
+  }
+  
     // skip duplicate “Add” trades
     if (signals.has(id)) {
       console.log(`⚠️ Add trade skipped: ${id}`);
