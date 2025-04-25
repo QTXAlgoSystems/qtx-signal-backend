@@ -34,6 +34,11 @@ app.post("/webhook", (req, res) => {
   }
 
   const payload = req.body;
+  // ID guard (add here)
+  if (!payload.id || payload.id.includes('undefined')) {
+    console.warn('⛔ Bad or missing ID, payload skipped:', payload);
+    return res.status(400).end();
+  }
   console.log("📩 Webhook Payload:", payload);
 
   // ensure entry timestamp exists
