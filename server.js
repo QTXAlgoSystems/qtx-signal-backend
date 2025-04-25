@@ -71,30 +71,40 @@ app.post("/webhook", (req, res) => {
     return res.json({ success: true });
   }
 
-  // --- updates: TP1 / TP2 / SL ---
-  const existing = signals.get(id);
-  if (!existing) {
-    console.warn(`⚠️ Unknown trade ID: ${id}`);
-    return res.status(404).json({ error: "Trade not found" });
-  }
+    // --- updates: SL wins over TP1/TP2 ---
+    const existing = signals.get(id);
+    if (!existing) {
+      console.warn(`⚠️ Unknown trade ID: ${id}`);
+      return res.status(404).json({ error: "Trade not found" });
+    }
+  
+    // 1) If this is a stop-loss alert, close immediately and return
+    if (payload.slHit) {
+      existing.slHit    = true;
+      existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
+      console.log(`🔒 SL closed trade: ${id}`);
+      return res.json({ success: true });
+    }
+  
+    // 2) Otherwise handle TP1 / TP2
+    if (payload.tp1Hit) {
+      existing.tp1Hit = true;
+      console.log(`🔔 TP1 updated for: ${id}`);
+    }
+    if (payload.tp2Hit) {
+      existing.tp2Hit = true;
+      console.log(`🔔 TP2 updated for: ${id}`);
+    }
+  
+    // 3) If both TPs are now hit, close the trade
+    if (existing.tp1Hit && existing.tp2Hit && !existing.closedAt) {
+      existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
+      console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
+    }
+  
+    console.log(`🔄 Trade updated: ${id}`);
+    return res.json({ success: true });
 
-  if (payload.tp1Hit) existing.tp1Hit = true;
-  if (payload.tp2Hit) existing.tp2Hit = true;
-
-  if (payload.slHit) {
-    existing.slHit    = true;
-    existing.closedAt = payload.timestamp;
-  }
-
-  // ensure we set closedAt once fully closed
-  const fullyClosed = (existing.tp1Hit && existing.tp2Hit) || existing.slHit;
-  if (fullyClosed && !existing.closedAt) {
-    existing.closedAt = payload.timestamp;
-    console.log(`✅ Trade closed: ${id}`);
-  }
-
-  console.log(`🔄 Trade updated: ${id}`);
-  return res.json({ success: true });
 });
 
 app.get("/api/latest-signals", (req, res) => {
