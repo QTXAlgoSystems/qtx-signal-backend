@@ -34,6 +34,10 @@ app.post("/webhook", (req, res) => {
   }
 
   const payload = req.body;
+    // Add/overwrite closedAt with the wall-clock moment the packet arrives
+  if (payload.tp1Hit || payload.tp2Hit || payload.slHit) {
+    payload.closedAt = new Date().toISOString();  // e.g. 2025-04-25T03:33:04.512Z
+  }
   // ID guard (add here)
   if (!payload.id || payload.id.includes('undefined')) {
     console.warn('⛔ Bad or missing ID, payload skipped:', payload);
@@ -77,37 +81,44 @@ app.post("/webhook", (req, res) => {
     return res.json({ success: true });
   }
 
-    // --- updates: SL wins over TP1/TP2 ---
+    // --- fetch existing trade
     const existing = signals.get(id);
     if (!existing) {
       console.warn(`⚠️ Unknown trade ID: ${id}`);
       return res.status(404).json({ error: "Trade not found" });
     }
-  
-    // 1) If this is a stop-loss alert, close immediately and return
+    
+    // 1) STOP-LOSS wins every time: close & return immediately
     if (payload.slHit) {
       existing.slHit    = true;
+      existing.slPrice  = payload.slPrice;
       existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
       console.log(`🔒 SL closed trade: ${id}`);
       return res.json({ success: true });
     }
-  
-    // 2) Otherwise handle TP1 / TP2
+    
+    // 2) TP1 update
     if (payload.tp1Hit) {
-      existing.tp1Hit = true;
+      existing.tp1Hit    = true;
+      existing.tp1Price  = payload.tp1Price;
+      existing.tp1Time   = payload.closedAt;
       console.log(`🔔 TP1 updated for: ${id}`);
     }
+    
+    // 3) TP2 update
     if (payload.tp2Hit) {
-      existing.tp2Hit = true;
+      existing.tp2Hit    = true;
+      existing.tp2Price  = payload.tp2Price;
+      existing.tp2Time   = payload.closedAt;
       console.log(`🔔 TP2 updated for: ${id}`);
     }
-  
-    // 3) If both TPs are now hit, close the trade
+    
+    // 4) If both TP1 & TP2 now hit, close the trade
     if (existing.tp1Hit && existing.tp2Hit && !existing.closedAt) {
       existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
       console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
     }
-  
+    
     console.log(`🔄 Trade updated: ${id}`);
     return res.json({ success: true });
 
