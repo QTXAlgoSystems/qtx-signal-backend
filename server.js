@@ -27,6 +27,7 @@ function getKey(payload) {
 }
 
 app.post("/webhook", (req, res) => {
+  console.log("[RAW]", JSON.stringify(req.body));
   const token = req.query.token;
   if (token !== WEBHOOK_TOKEN) {
     return res.status(403).json({ error: "Invalid token" });
