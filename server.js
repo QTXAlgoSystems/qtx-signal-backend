@@ -66,14 +66,22 @@ app.post("/webhook", (req, res) => {
     // ── auto-close opposite trades on the *same* instrument ──
     const { sym: newSym, tf: newTF } = splitId(id);
     for (const [key, sig] of signals.entries()) {
-      const { sym, tf } = splitId(key);
-      const opposite = sig.direction !== payload.direction;
-      const notClosed = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
-
+      const { sym, tf }    = splitId(key);
+      const opposite       = sig.direction !== payload.direction;
+      const notClosed      = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
+  
       if (sym === newSym && tf === newTF && opposite && notClosed) {
+        // 1) mark the partial-exit flags
         sig.tp1Hit = true;
         sig.tp2Hit = true;
+  
+        // 2) record the exit price for each leg so PnL math works
+        sig.tp1Price = payload.entryPrice;
+        sig.tp2Price = payload.entryPrice;
+  
+        // 3) timestamp the close
         sig.closedAt = payload.timestamp;
+  
         console.log(`🔁 Auto-closed: ${key}`);
       }
     }
