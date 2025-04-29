@@ -90,7 +90,6 @@ app.post("/webhook", async (req, res) => {
         else console.log(`🔁 Auto-closed opposite trades for ${sym}_${tf}`);
       });
     // 2) now insert the new entry
-    const tf = id.split("_")[1] || "";
     const { error: insertErr } = await supabase
       .from("signals")
       .insert([{
