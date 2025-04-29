@@ -32,6 +32,16 @@ function splitId(id) {
   return { sym, tf };
 }
 
+// Helper to calculate PnL %
+function calculatePnl(entryPrice, exitPrice, direction) {
+  if (!entryPrice || !exitPrice) return 0;
+  if (direction === "LONG") {
+    return ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
+  } else {
+    return ((entryPrice - exitPrice) / entryPrice * 100).toFixed(2);
+  }
+}
+
 app.post("/webhook", (req, res) => {
   console.log("[RAW]", JSON.stringify(req.body));
   const token = req.query.token;
@@ -104,15 +114,19 @@ app.post("/webhook", (req, res) => {
     return res.status(404).json({ error: "Trade not found" });
   }
 
-  // 1) STOP-LOSS wins every time: close & return immediately
+  // 1) STOP-LOSS wins every time: close & calculate PnL
   if (payload.slHit) {
     existing.slHit = true;
     existing.slPrice = payload.slPrice;
     existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
-    console.log(`🔒 SL closed trade: ${id}`);
+  
+    // 🔥 NEW: calculate PnL for SL
+    existing.pnlPercent = calculatePnl(existing.entryPrice, existing.slPrice, existing.direction);
+  
+    console.log(`🔒 SL closed trade: ${id} | PnL: ${existing.pnlPercent}%`);
     return res.json({ success: true });
   }
-
+  
   // 2) TP1 update
   if (payload.tp1Hit) {
     existing.tp1Hit = true;
@@ -129,10 +143,16 @@ app.post("/webhook", (req, res) => {
     console.log(`🔔 TP2 updated for: ${id}`);
   }
 
-  // 4) If both TP1 & TP2 now hit, close the trade
+  // 4) If both TP1 & TP2 now hit, close the trade and calculate PnL
   if (existing.tp1Hit && existing.tp2Hit && !existing.closedAt) {
     existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
-    console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
+  
+    // 🔥 NEW: calculate blended PnL for TP1 + TP2
+    const pnlTp1 = calculatePnl(existing.entryPrice, existing.tp1Price, existing.direction);
+    const pnlTp2 = calculatePnl(existing.entryPrice, existing.tp2Price, existing.direction);
+    existing.pnlPercent = ((parseFloat(pnlTp1) + parseFloat(pnlTp2)) / 2).toFixed(2);
+  
+    console.log(`✅ Trade closed (TP1 + TP2): ${id} | Avg PnL: ${existing.pnlPercent}%`);
   }
 
   console.log(`🔄 Trade updated: ${id}`);
