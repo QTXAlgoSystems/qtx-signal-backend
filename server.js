@@ -77,11 +77,11 @@ app.post("/webhook", async (req, res) => {
         id,
         setup:      payload.tradeType,
         direction:  payload.direction,
-        entryPrice: payload.entryPrice,
+        entryprice: payload.entryPrice,
         score:      payload.score,
         risk:       payload.risk,
-        stopLoss:   payload.stopLoss,
-        startedAt:  payload.startedAt,
+        stoploss:   payload.stopLoss,
+        startedat:  payload.startedAt,
         timestamp:  payload.timestamp
       }], { returning: "minimal" });
 
@@ -115,9 +115,9 @@ app.post("/webhook", async (req, res) => {
     const { error: slErr } = await supabase
       .from("signals")
       .update({
-        slHit:    true,
-        slPrice:  payload.slPrice,
-        closedAt: payload.closedAt || payload.timestamp
+        slhit:    true,
+        slprice:  payload.slPrice,
+        closedat: payload.closedAt || payload.timestamp
       })
       .eq("id", id);
     if (slErr) console.error("❌ SL update error:", slErr);
@@ -130,9 +130,9 @@ app.post("/webhook", async (req, res) => {
     const { error: tp1Err } = await supabase
       .from("signals")
       .update({
-        tp1Hit:   true,
-        tp1Price: payload.tp1Price,
-        tp1Time:  payload.closedAt
+        tp1hit:   true,
+        tp1price: payload.tp1Price,
+        tp1time:  payload.closedAt
       })
       .eq("id", id);
     if (tp1Err) console.error("❌ TP1 update error:", tp1Err);
@@ -144,9 +144,9 @@ app.post("/webhook", async (req, res) => {
     const { error: tp2Err } = await supabase
       .from("signals")
       .update({
-        tp2Hit:   true,
-        tp2Price: payload.tp2Price,
-        tp2Time:  payload.closedAt
+        tp2hit:   true,
+        tp2price: payload.tp2Price,
+        tp2time:  payload.closedAt
       })
       .eq("id", id);
     if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
@@ -155,10 +155,10 @@ app.post("/webhook", async (req, res) => {
 
   // 4) Final-close if TP1 & TP2
   const existing = existingArr[0];
-  if (existing.tp1Hit && existing.tp2Hit && !existing.closedAt) {
+  if (existing.tp1hit && existing.tp2hit && !existing.closedat) {
     const { error: closeErr } = await supabase
       .from("signals")
-      .update({ closedAt: payload.closedAt || payload.timestamp })
+      .update({ closedat: payload.closedAt || payload.timestamp })
       .eq("id", id)
       .is("closedAt", null);
     if (closeErr) console.error("❌ Final-close error:", closeErr);
