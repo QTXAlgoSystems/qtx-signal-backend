@@ -70,6 +70,26 @@ app.post("/webhook", async (req, res) => {
 
   // ── ENTRY: insert new signal ───────────────────────────────
   if (isEntry) {
+    // 1) auto-close opposite trades
+    const [ sym, tf ] = id.split("_");
+    await supabase
+      .from("signals")
+      .update({
+        tp1hit:   true,
+        tp2hit:   true,
+        tp1price: payload.entryPrice,
+        tp2price: payload.entryPrice,
+        closedat: payload.timestamp
+      })
+      .eq("timeframe", tf)
+      .eq("direction", payload.direction === "LONG" ? "SHORT" : "LONG")
+      .like("trade_id", `${sym}_${tf}_%`)
+      .is("closedat", null)
+      .then(({ error }) => {
+        if (error) console.error("❌ Auto-close error:", error);
+        else console.log(`🔁 Auto-closed opposite trades for ${sym}_${tf}`);
+      });
+    // 2) now insert the new entry
     const tf = id.split("_")[1] || "";
     const { error: insertErr } = await supabase
       .from("signals")
