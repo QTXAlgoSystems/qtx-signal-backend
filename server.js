@@ -74,7 +74,7 @@ app.post("/webhook", async (req, res) => {
     const { error: insertErr } = await supabase
       .from("signals")
       .insert([{
-        id,
+        trade_id:   id,               // ← write into trade_id, not id
         setup:      payload.tradeType,
         direction:  payload.direction,
         entryprice: payload.entryPrice,
@@ -84,12 +84,12 @@ app.post("/webhook", async (req, res) => {
         startedat:  payload.startedAt,
         timestamp:  payload.timestamp
       }], { returning: "minimal" });
-
+  
     if (insertErr) {
       console.error("❌ INSERT error:", insertErr);
       return res.status(500).json({ error: "DB insert failed" });
     }
-
+  
     console.log(`✅ New entry stored: ${id}`);
     return res.json({ success: true });
   }
