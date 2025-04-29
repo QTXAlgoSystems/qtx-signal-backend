@@ -111,14 +111,20 @@ app.post("/webhook", async (req, res) => {
     return res.status(404).json({ error: "Trade not found" });
   }
 
-  // 1) STOP-LOSS
+  // ── STOP-LOSS (final close) ──
   if (payload.slHit) {
+    const existing = existingArr[0];
     const { error: slErr } = await supabase
       .from("signals")
       .update({
-        slhit:    true,
-        slprice:  payload.slPrice,
-        closedat: payload.closedAt || payload.timestamp
+        slhit:      true,
+        slprice:    payload.slPrice,
+        closedat:   payload.closedAt || payload.timestamp,
+        pnlpercent: calculatePnl(
+                       existing.entryprice,
+                       payload.slPrice,
+                       existing.direction
+                     )
       })
       .eq("trade_id", id)
       .is("closedat", null);
@@ -127,35 +133,30 @@ app.post("/webhook", async (req, res) => {
     return res.json({ success: true });
   }
 
-  // 2) TP1
+  // ── TP1 update ──
   if (payload.tp1Hit) {
-    // grab the one open row
     const existing = existingArr[0];
-  
     const { error: tp1Err } = await supabase
       .from("signals")
       .update({
-        tp1hit:     true,
-        tp1price:   payload.tp1Price,
-        tp1time:    payload.closedAt,
-        tp1percent: calculatePnl(
-                       existing.entryprice,
-                       payload.tp1Price,
-                       existing.direction
+        tp1hit:      true,
+        tp1price:    payload.tp1Price,
+        tp1time:     payload.closedAt,
+        tp1percent:  calculatePnl(
+                        existing.entryprice,
+                        payload.tp1Price,
+                        existing.direction
                      )
       })
       .eq("trade_id", id)
       .is("closedat", null);
-  
     if (tp1Err) console.error("❌ TP1 update error:", tp1Err);
     console.log(`🔔 TP1 updated for: ${id}`);
   }
 
-  // 3) TP2
+  // ── TP2 update ──
   if (payload.tp2Hit) {
-    // grab the one still‐open row
     const existing = existingArr[0];
-  
     const { error: tp2Err } = await supabase
       .from("signals")
       .update({
@@ -163,29 +164,37 @@ app.post("/webhook", async (req, res) => {
         tp2price:    payload.tp2Price,
         tp2time:     payload.closedAt,
         tp2percent:  calculatePnl(
+                        existing.entryprice,
+                        payload.tp2Price,
+                        existing.direction
+                     )
+      })
+      .eq("trade_id", id)
+      .is("closedat", null);
+    if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
+    console.log(`🔔 TP2 updated for: ${id}`);
+  }
+
+  // ── FINAL CLOSE: both TP1+TP2 ──
+  const existing = existingArr[0];
+  if (existing.tp1hit && existing.tp2hit && !existing.closedat) {
+    const avgExit = (existing.tp1price + existing.tp2price) / 2;
+    const { error: closeErr } = await supabase
+      .from("signals")
+      .update({
+        closedat:   payload.closedAt || payload.timestamp,
+        pnlpercent: calculatePnl(
                        existing.entryprice,
-                       payload.tp2Price,
+                       avgExit,
                        existing.direction
                      )
       })
       .eq("trade_id", id)
       .is("closedat", null);
-  
-    if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
-    console.log(`🔔 TP2 updated for: ${id}`);
-  }
-
-  // 4) Final-close if TP1 & TP2
-  const existing = existingArr[0];
-  if (existing.tp1hit && existing.tp2hit && !existing.closedat) {
-    const { error: closeErr } = await supabase
-      .from("signals")
-      .update({ closedat: payload.closedAt || payload.timestamp })
-      .eq("trade_id", id)
-      .is("closedat", null);
     if (closeErr) console.error("❌ Final-close error:", closeErr);
     console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
   }
+
 
   return res.json({ success: true });
 });
