@@ -133,46 +133,98 @@ app.post("/webhook", async (req, res) => {
     return res.json({ success: true });
   }
 
-  // ── TP1 update ──
+  // ── TP1 update (and conditional final-close if TP2 already hit) ──
   if (payload.tp1Hit) {
     const existing = existingArr[0];
+  
+    // 1) write TP1 fields + TP1%
     const { error: tp1Err } = await supabase
       .from("signals")
       .update({
-        tp1hit:      true,
-        tp1price:    payload.tp1Price,
-        tp1time:     payload.closedAt,
-        tp1percent:  calculatePnl(
-                        existing.entryprice,
-                        payload.tp1Price,
-                        existing.direction
+        tp1hit:     true,
+        tp1price:   payload.tp1Price,
+        tp1time:    payload.closedAt,
+        tp1percent: calculatePnl(
+                       existing.entryprice,
+                       payload.tp1Price,
+                       existing.direction
                      )
       })
       .eq("trade_id", id)
       .is("closedat", null);
+  
     if (tp1Err) console.error("❌ TP1 update error:", tp1Err);
     console.log(`🔔 TP1 updated for: ${id}`);
+  
+    // 2) if TP2 already fired, do the final-close now
+    if (existing.tp2hit) {
+      const avgExit = (payload.tp1Price + existing.tp2price) / 2;
+      const { error: fcErr } = await supabase
+        .from("signals")
+        .update({
+          closedat:   payload.closedAt,
+          pnlpercent: calculatePnl(
+                         existing.entryprice,
+                         avgExit,
+                         existing.direction
+                       )
+        })
+        .eq("trade_id", id)
+        .is("closedat", null);
+  
+      if (fcErr) console.error("❌ Final-close error:", fcErr);
+      console.log(`✅ Trade closed (TP1 + TP2) for: ${id} @ ${payload.closedAt}`);
+    }
+  
+    // 3) stop further processing in this request
+    return res.json({ success: true });
   }
-
-  // ── TP2 update ──
+  
+  // ── TP2 update (and conditional final-close if TP1 already hit) ──
   if (payload.tp2Hit) {
     const existing = existingArr[0];
+  
+    // 1) write TP2 fields + TP2%
     const { error: tp2Err } = await supabase
       .from("signals")
       .update({
-        tp2hit:      true,
-        tp2price:    payload.tp2Price,
-        tp2time:     payload.closedAt,
-        tp2percent:  calculatePnl(
-                        existing.entryprice,
-                        payload.tp2Price,
-                        existing.direction
+        tp2hit:     true,
+        tp2price:   payload.tp2Price,
+        tp2time:    payload.closedAt,
+        tp2percent: calculatePnl(
+                       existing.entryprice,
+                       payload.tp2Price,
+                       existing.direction
                      )
       })
       .eq("trade_id", id)
       .is("closedat", null);
+  
     if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
     console.log(`🔔 TP2 updated for: ${id}`);
+  
+    // 2) if TP1 already fired, do the final-close now
+    if (existing.tp1hit) {
+      const avgExit = (existing.tp1price + payload.tp2Price) / 2;
+      const { error: fcErr } = await supabase
+        .from("signals")
+        .update({
+          closedat:   payload.closedAt,
+          pnlpercent: calculatePnl(
+                         existing.entryprice,
+                         avgExit,
+                         existing.direction
+                       )
+        })
+        .eq("trade_id", id)
+        .is("closedat", null);
+  
+      if (fcErr) console.error("❌ Final-close error:", fcErr);
+      console.log(`✅ Trade closed (TP1 + TP2) for: ${id} @ ${payload.closedAt}`);
+    }
+  
+    // 3) stop further processing in this request
+    return res.json({ success: true });
   }
 
   // ── FINAL CLOSE: both TP1+TP2 ──
