@@ -135,6 +135,11 @@ app.post("/webhook", async (req, res) => {
         tp1hit:   true,
         tp1price: payload.tp1Price,
         tp1time:  payload.closedAt
+        tp1percent:  calculatePnl(
+                      existing.entryprice,
+                      payload.tp1Price,
+                      existing.direction
+                   )
       })
       .eq("trade_id", id)
       .is("closedat", null);
@@ -150,6 +155,11 @@ app.post("/webhook", async (req, res) => {
         tp2hit:   true,
         tp2price: payload.tp2Price,
         tp2time:  payload.closedAt
+        tp2percent:  calculatePnl(
+                existing.entryprice,
+                payload.tp2Price,
+                existing.direction
+             )
       })
       .eq("trade_id", id)
       .is("closedat", null);
