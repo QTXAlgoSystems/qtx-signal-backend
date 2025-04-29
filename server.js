@@ -15,7 +15,12 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.options("*", (req, res) => res.sendStatus(204));
 
-const signals = new Map();
+// ── Supabase client initialization ──
+const { createClient } = require("@supabase/supabase-js");
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // Build a unique key: use non‐empty id, else symbol_timestamp
 function getKey(payload) {
