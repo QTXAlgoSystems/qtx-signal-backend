@@ -153,20 +153,24 @@ app.post("/webhook", async (req, res) => {
 
   // 3) TP2
   if (payload.tp2Hit) {
+    // grab the one still‐open row
+    const existing = existingArr[0];
+  
     const { error: tp2Err } = await supabase
       .from("signals")
       .update({
-        tp2hit:   true,
-        tp2price: payload.tp2Price,
-        tp2time:  payload.closedAt
+        tp2hit:      true,
+        tp2price:    payload.tp2Price,
+        tp2time:     payload.closedAt,
         tp2percent:  calculatePnl(
-                existing.entryprice,
-                payload.tp2Price,
-                existing.direction
-             )
+                       existing.entryprice,
+                       payload.tp2Price,
+                       existing.direction
+                     )
       })
       .eq("trade_id", id)
       .is("closedat", null);
+  
     if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
     console.log(`🔔 TP2 updated for: ${id}`);
   }
