@@ -47,7 +47,7 @@ function calculatePnl(entryPrice, exitPrice, direction) {
   }
 }
 
-app.post("/webhook", (req, res) => {
+app.post("/webhook", async (req, res) => {
   console.log("[RAW]", JSON.stringify(req.body));
   const token = req.query.token;
   if (token !== WEBHOOK_TOKEN) {
@@ -55,112 +55,116 @@ app.post("/webhook", (req, res) => {
   }
 
   const payload = req.body;
-
-  // Add/overwrite closedAt with the wall-clock moment the packet arrives
   if (payload.tp1Hit || payload.tp2Hit || payload.slHit) {
     payload.closedAt = new Date().toISOString();
   }
-
-  // ID guard
   if (!payload.id || payload.id.includes("undefined")) {
     console.warn("⛔ Bad or missing ID, payload skipped:", payload);
     return res.status(400).end();
   }
-  console.log("📩 Webhook Payload:", payload);
-
-  // ensure entry timestamp exists
   if (!payload.timestamp) {
     payload.timestamp = new Date().toISOString();
   }
 
-  const id = getKey(payload);
+  const id      = payload.id.trim();
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
-  console.log("🧠 Current signal keys:", Array.from(signals.keys()));
 
+  // ── ENTRY: insert new signal ───────────────────────────────
   if (isEntry) {
-    // ── auto-close opposite trades on the *same* instrument ──
-    const { sym: newSym, tf: newTF } = splitId(id);
-    for (const [key, sig] of signals.entries()) {
-      const { sym, tf }    = splitId(key);
-      const opposite       = sig.direction !== payload.direction;
-      const notClosed      = !sig.slHit && !(sig.tp1Hit && sig.tp2Hit);
-  
-      if (sym === newSym && tf === newTF && opposite && notClosed) {
-        // 1) mark the partial-exit flags
-        sig.tp1Hit = true;
-        sig.tp2Hit = true;
-  
-        // 2) record the exit price for each leg so PnL math works
-        sig.tp1Price = payload.entryPrice;
-        sig.tp2Price = payload.entryPrice;
-  
-        // 3) timestamp the close
-        sig.closedAt = payload.timestamp;
-  
-        console.log(`🔁 Auto-closed: ${key}`);
-      }
+    const { error: insertErr } = await supabase
+      .from("signals")
+      .insert([{
+        id,
+        setup:      payload.tradeType,
+        direction:  payload.direction,
+        entryPrice: payload.entryPrice,
+        score:      payload.score,
+        risk:       payload.risk,
+        stopLoss:   payload.stopLoss,
+        startedAt:  payload.startedAt,
+        timestamp:  payload.timestamp
+      }], { returning: "minimal" });
+
+    if (insertErr) {
+      console.error("❌ INSERT error:", insertErr);
+      return res.status(500).json({ error: "DB insert failed" });
     }
 
-    // skip duplicate “Add” trades
-    if (signals.has(id)) {
-      console.log(`⚠️ Add trade skipped: ${id}`);
-      return res.json({ success: true, message: "Add trade skipped" });
-    }
-
-    signals.set(id, payload);
     console.log(`✅ New entry stored: ${id}`);
     return res.json({ success: true });
   }
 
-  // --- updates: SL wins over TP1/TP2 ---
-  const existing = signals.get(id);
-  if (!existing) {
+  // ── UPDATES: TP1 / TP2 / SL ─────────────────────────────────
+  let { data: existingArr, error: selectErr } = await supabase
+    .from("signals")
+    .select("*")
+    .eq("id", id)
+    .limit(1);
+
+  if (selectErr) {
+    console.error("❌ SELECT error:", selectErr);
+    return res.status(500).json({ error: "DB select failed" });
+  }
+  if (existingArr.length === 0) {
     console.warn(`⚠️ Unknown trade ID: ${id}`);
     return res.status(404).json({ error: "Trade not found" });
   }
 
-  // 1) STOP-LOSS wins every time: close & calculate PnL
+  // 1) STOP-LOSS
   if (payload.slHit) {
-    existing.slHit = true;
-    existing.slPrice = payload.slPrice;
-    existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
-  
-    // 🔥 NEW: calculate PnL for SL
-    existing.pnlPercent = calculatePnl(existing.entryPrice, existing.slPrice, existing.direction);
-  
-    console.log(`🔒 SL closed trade: ${id} | PnL: ${existing.pnlPercent}%`);
+    const { error: slErr } = await supabase
+      .from("signals")
+      .update({
+        slHit:    true,
+        slPrice:  payload.slPrice,
+        closedAt: payload.closedAt || payload.timestamp
+      })
+      .eq("id", id);
+    if (slErr) console.error("❌ SL update error:", slErr);
+    console.log(`🔒 SL closed trade: ${id}`);
     return res.json({ success: true });
   }
-  
-  // 2) TP1 update
+
+  // 2) TP1
   if (payload.tp1Hit) {
-    existing.tp1Hit = true;
-    existing.tp1Price = payload.tp1Price;
-    existing.tp1Time = payload.closedAt;
+    const { error: tp1Err } = await supabase
+      .from("signals")
+      .update({
+        tp1Hit:   true,
+        tp1Price: payload.tp1Price,
+        tp1Time:  payload.closedAt
+      })
+      .eq("id", id);
+    if (tp1Err) console.error("❌ TP1 update error:", tp1Err);
     console.log(`🔔 TP1 updated for: ${id}`);
   }
 
-  // 3) TP2 update
+  // 3) TP2
   if (payload.tp2Hit) {
-    existing.tp2Hit = true;
-    existing.tp2Price = payload.tp2Price;
-    existing.tp2Time = payload.closedAt;
+    const { error: tp2Err } = await supabase
+      .from("signals")
+      .update({
+        tp2Hit:   true,
+        tp2Price: payload.tp2Price,
+        tp2Time:  payload.closedAt
+      })
+      .eq("id", id);
+    if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
     console.log(`🔔 TP2 updated for: ${id}`);
   }
 
-  // 4) If both TP1 & TP2 now hit, close the trade and calculate PnL
+  // 4) Final-close if TP1 & TP2
+  const existing = existingArr[0];
   if (existing.tp1Hit && existing.tp2Hit && !existing.closedAt) {
-    existing.closedAt = payload.closedAt || payload.timestamp || new Date().toISOString();
-  
-    // 🔥 NEW: calculate blended PnL for TP1 + TP2
-    const pnlTp1 = calculatePnl(existing.entryPrice, existing.tp1Price, existing.direction);
-    const pnlTp2 = calculatePnl(existing.entryPrice, existing.tp2Price, existing.direction);
-    existing.pnlPercent = ((parseFloat(pnlTp1) + parseFloat(pnlTp2)) / 2).toFixed(2);
-  
-    console.log(`✅ Trade closed (TP1 + TP2): ${id} | Avg PnL: ${existing.pnlPercent}%`);
+    const { error: closeErr } = await supabase
+      .from("signals")
+      .update({ closedAt: payload.closedAt || payload.timestamp })
+      .eq("id", id)
+      .is("closedAt", null);
+    if (closeErr) console.error("❌ Final-close error:", closeErr);
+    console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
   }
 
-  console.log(`🔄 Trade updated: ${id}`);
   return res.json({ success: true });
 });
 
