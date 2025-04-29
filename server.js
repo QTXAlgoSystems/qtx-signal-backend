@@ -40,11 +40,10 @@ function splitId(id) {
 // Helper to calculate PnL %
 function calculatePnl(entryPrice, exitPrice, direction) {
   if (!entryPrice || !exitPrice) return 0;
-  if (direction === "LONG") {
-    return ((exitPrice - entryPrice) / entryPrice * 100).toFixed(2);
-  } else {
-    return ((entryPrice - exitPrice) / entryPrice * 100).toFixed(2);
-  }
+  const raw = direction === "LONG"
+    ? (exitPrice - entryPrice) / entryPrice * 100
+    : (entryPrice - exitPrice) / entryPrice * 100;
+  return raw.toFixed(3);
 }
 
 app.post("/webhook", async (req, res) => {
