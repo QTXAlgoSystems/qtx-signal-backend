@@ -94,11 +94,12 @@ app.post("/webhook", async (req, res) => {
     return res.json({ success: true });
   }
 
-  // ── UPDATES: TP1 / TP2 / SL ─────────────────────────────────
+  // --- UPDATES: TP1 / TP2 / SL ---
   let { data: existingArr, error: selectErr } = await supabase
     .from("signals")
     .select("*")
-    .eq("id", id)
+    .eq("trade_id", id)
+    .is("closedat", null)
     .limit(1);
 
   if (selectErr) {
@@ -119,7 +120,8 @@ app.post("/webhook", async (req, res) => {
         slprice:  payload.slPrice,
         closedat: payload.closedAt || payload.timestamp
       })
-      .eq("id", id);
+      .eq("trade_id", id)
+      .is("closedat", null);
     if (slErr) console.error("❌ SL update error:", slErr);
     console.log(`🔒 SL closed trade: ${id}`);
     return res.json({ success: true });
@@ -134,7 +136,8 @@ app.post("/webhook", async (req, res) => {
         tp1price: payload.tp1Price,
         tp1time:  payload.closedAt
       })
-      .eq("id", id);
+      .eq("trade_id", id)
+      .is("closedat", null);
     if (tp1Err) console.error("❌ TP1 update error:", tp1Err);
     console.log(`🔔 TP1 updated for: ${id}`);
   }
@@ -148,7 +151,8 @@ app.post("/webhook", async (req, res) => {
         tp2price: payload.tp2Price,
         tp2time:  payload.closedAt
       })
-      .eq("id", id);
+      .eq("trade_id", id)
+      .is("closedat", null);
     if (tp2Err) console.error("❌ TP2 update error:", tp2Err);
     console.log(`🔔 TP2 updated for: ${id}`);
   }
@@ -159,8 +163,8 @@ app.post("/webhook", async (req, res) => {
     const { error: closeErr } = await supabase
       .from("signals")
       .update({ closedat: payload.closedAt || payload.timestamp })
-      .eq("id", id)
-      .is("closedAt", null);
+      .eq("trade_id", id)
+      .is("closedat", null);
     if (closeErr) console.error("❌ Final-close error:", closeErr);
     console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
   }
