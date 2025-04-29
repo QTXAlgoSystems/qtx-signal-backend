@@ -129,20 +129,24 @@ app.post("/webhook", async (req, res) => {
 
   // 2) TP1
   if (payload.tp1Hit) {
+    // grab the one open row
+    const existing = existingArr[0];
+  
     const { error: tp1Err } = await supabase
       .from("signals")
       .update({
-        tp1hit:   true,
-        tp1price: payload.tp1Price,
-        tp1time:  payload.closedAt
-        tp1percent:  calculatePnl(
-                      existing.entryprice,
-                      payload.tp1Price,
-                      existing.direction
-                   )
+        tp1hit:     true,
+        tp1price:   payload.tp1Price,
+        tp1time:    payload.closedAt,
+        tp1percent: calculatePnl(
+                       existing.entryprice,
+                       payload.tp1Price,
+                       existing.direction
+                     )
       })
       .eq("trade_id", id)
       .is("closedat", null);
+  
     if (tp1Err) console.error("❌ TP1 update error:", tp1Err);
     console.log(`🔔 TP1 updated for: ${id}`);
   }
