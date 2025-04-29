@@ -70,10 +70,12 @@ app.post("/webhook", async (req, res) => {
 
   // ── ENTRY: insert new signal ───────────────────────────────
   if (isEntry) {
+    const tf = id.split("_")[1] || "";
     const { error: insertErr } = await supabase
       .from("signals")
       .insert([{
         trade_id:   id,               // ← write into trade_id, not id
+        timeframe:  tf, 
         setup:      payload.tradeType,
         direction:  payload.direction,
         entryprice: payload.entryPrice,
