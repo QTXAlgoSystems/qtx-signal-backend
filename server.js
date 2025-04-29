@@ -164,11 +164,22 @@ app.post("/webhook", (req, res) => {
   return res.json({ success: true });
 });
 
-app.get("/api/latest-signals", (req, res) => {
-  const signalArray = Array.from(signals.values());
-  console.log("📤 Returning", signalArray.length, "signals");
-  res.json(signalArray);
+app.get("/api/latest-signals", async (req, res) => {
+  // Pull all signals, newest first
+  const { data, error } = await supabase
+    .from("signals")
+    .select("*")
+    .order("timestamp", { ascending: false });
+
+  if (error) {
+    console.error("❌ Supabase SELECT error:", error);
+    return res.status(500).json({ error: "Database error" });
+  }
+
+  console.log("📤 Returning", data.length, "signals");
+  res.json(data);
 });
+
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
