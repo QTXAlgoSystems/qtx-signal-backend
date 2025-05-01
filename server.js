@@ -107,8 +107,6 @@ app.post("/webhook", async (req, res) => {
         biashtf1:    payload.biasHTF1    ?? null,
         biashtf2:    payload.biasHTF2    ?? null,
         htf_logic:   payload.htfLogic    || null,
-        contbiasmin: payload.contBiasMin ?? null,
-        revbiasmax:  payload.revBiasMax  ?? null
       }], { returning: "minimal" });
   
     if (insertErr) {
