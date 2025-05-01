@@ -276,21 +276,24 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.get("/api/latest-signals", async (req, res) => {
-  // Pull all signals, newest first
+  // Pull only open or recently closed signals (last 10 minutes), newest first
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
   const { data, error } = await supabase
     .from("signals")
     .select("*")
-    .order("timestamp", { ascending: false });
+    .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
+    .order("timestamp", { ascending: false })
+    .limit(100); // cap to 100 results to prevent overload
 
   if (error) {
     console.error("❌ Supabase SELECT error:", error);
     return res.status(500).json({ error: "Database error" });
   }
 
-  console.log("📤 Returning", data.length, "signals");
+  console.log("📤 Returning", data.length, "signals (limited to active + recent)");
   res.json(data);
 });
-
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
