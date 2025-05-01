@@ -84,10 +84,17 @@ app.post("/webhook", async (req, res) => {
       console.error("❌ Failed to fetch opposite trades:", fetchOppErr);
     } else {
       for (const trade of openOpposites) {
+        // ⛔ Don't update if SL was already hit
+        if (trade.slhit) {
+          console.log(`⚠️ Skipping auto-close for ${trade.trade_id} — SL already hit`);
+          continue;
+        }
+    
         const updatePayload = {
           closedat: payload.timestamp
         };
     
+        // ✅ Only update TP1 if not already hit
         if (!trade.tp1hit) {
           updatePayload.tp1hit = true;
           updatePayload.tp1price = payload.entryPrice;
@@ -99,6 +106,7 @@ app.post("/webhook", async (req, res) => {
           );
         }
     
+        // ✅ Only update TP2 if not already hit
         if (!trade.tp2hit) {
           updatePayload.tp2hit = true;
           updatePayload.tp2price = payload.entryPrice;
@@ -110,11 +118,18 @@ app.post("/webhook", async (req, res) => {
           );
         }
     
-        updatePayload.pnlpercent = calculatePnl(
-          trade.entryprice,
-          payload.entryPrice,
-          trade.direction
-        );
+        // ✅ Set final PnL only if both exits now exist
+        const tp1 = trade.tp1hit ? trade.tp1price : updatePayload.tp1price;
+        const tp2 = trade.tp2hit ? trade.tp2price : updatePayload.tp2price;
+    
+        if (tp1 && tp2) {
+          const avgExit = (parseFloat(tp1) + parseFloat(tp2)) / 2;
+          updatePayload.pnlpercent = calculatePnl(
+            trade.entryprice,
+            avgExit,
+            trade.direction
+          );
+        }
     
         const { error: closeErr } = await supabase
           .from("signals")
@@ -124,7 +139,7 @@ app.post("/webhook", async (req, res) => {
         if (closeErr) {
           console.error("❌ Auto-close update error:", closeErr);
         } else {
-          console.log(`🔁 Auto-closed trade ${trade.trade_id} with preserved TP state`);
+          console.log(`🔁 Auto-closed trade ${trade.trade_id} with protected TP/SL logic`);
         }
       }
     }
