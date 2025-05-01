@@ -143,7 +143,22 @@ app.post("/webhook", async (req, res) => {
         }
       }
     }
-
+    
+    // ✅ Deduplication check: prevent duplicate open trade_id entries
+    const { data: existingOpen, error: existingErr } = await supabase
+      .from("signals")
+      .select("uid")
+      .eq("trade_id", id)
+      .is("closedat", null)
+      .limit(1);
+  
+    if (existingErr) {
+      console.error("❌ Error checking for duplicate trade:", existingErr);
+    } else if (existingOpen.length > 0) {
+      console.warn(`⚠️ Duplicate open trade detected for ${id}, skipping insert`);
+      return res.status(200).json({ ignored: true });
+    }
+    
     // 2) now insert the new entry
     const { error: insertErr } = await supabase
       .from("signals")
