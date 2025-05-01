@@ -72,23 +72,63 @@ app.post("/webhook", async (req, res) => {
   if (isEntry) {
     // 1) auto-close opposite trades
     const [ sym, tf ] = id.split("_");
-    await supabase
+    const { data: openOpposites, error: fetchOppErr } = await supabase
       .from("signals")
-      .update({
-        tp1hit:   true,
-        tp2hit:   true,
-        tp1price: payload.entryPrice,
-        tp2price: payload.entryPrice,
-        closedat: payload.timestamp
-      })
+      .select("*")
       .eq("timeframe", tf)
       .eq("direction", payload.direction === "LONG" ? "SHORT" : "LONG")
       .like("trade_id", `${sym}_${tf}_%`)
-      .is("closedat", null)
-      .then(({ error }) => {
-        if (error) console.error("❌ Auto-close error:", error);
-        else console.log(`🔁 Auto-closed opposite trades for ${sym}_${tf}`);
-      });
+      .is("closedat", null);
+    
+    if (fetchOppErr) {
+      console.error("❌ Failed to fetch opposite trades:", fetchOppErr);
+    } else {
+      for (const trade of openOpposites) {
+        const updatePayload = {
+          closedat: payload.timestamp
+        };
+    
+        if (!trade.tp1hit) {
+          updatePayload.tp1hit = true;
+          updatePayload.tp1price = payload.entryPrice;
+          updatePayload.tp1time = payload.timestamp;
+          updatePayload.tp1percent = calculatePnl(
+            trade.entryprice,
+            payload.entryPrice,
+            trade.direction
+          );
+        }
+    
+        if (!trade.tp2hit) {
+          updatePayload.tp2hit = true;
+          updatePayload.tp2price = payload.entryPrice;
+          updatePayload.tp2time = payload.timestamp;
+          updatePayload.tp2percent = calculatePnl(
+            trade.entryprice,
+            payload.entryPrice,
+            trade.direction
+          );
+        }
+    
+        updatePayload.pnlpercent = calculatePnl(
+          trade.entryprice,
+          payload.entryPrice,
+          trade.direction
+        );
+    
+        const { error: closeErr } = await supabase
+          .from("signals")
+          .update(updatePayload)
+          .eq("trade_id", trade.trade_id);
+    
+        if (closeErr) {
+          console.error("❌ Auto-close update error:", closeErr);
+        } else {
+          console.log(`🔁 Auto-closed trade ${trade.trade_id} with preserved TP state`);
+        }
+      }
+    }
+
     // 2) now insert the new entry
     const { error: insertErr } = await supabase
       .from("signals")
