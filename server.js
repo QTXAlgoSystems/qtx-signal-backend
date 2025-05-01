@@ -103,6 +103,13 @@ app.post("/webhook", async (req, res) => {
         stoploss:   payload.stopLoss,
         startedat:  payload.startedAt,
         timestamp:  payload.timestamp
+        // ✅ New MTF Bias Fields (safely defaults to null)
+        version:     payload.version     || null,
+        biashtf1:    payload.biasHTF1    ?? null,
+        biashtf2:    payload.biasHTF2    ?? null,
+        htf_logic:   payload.htfLogic    || null,
+        contbiasmin: payload.contBiasMin ?? null,
+        revbiasmax:  payload.revBiasMax  ?? null
       }], { returning: "minimal" });
   
     if (insertErr) {
