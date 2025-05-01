@@ -102,8 +102,7 @@ app.post("/webhook", async (req, res) => {
         risk:       payload.risk,
         stoploss:   payload.stopLoss,
         startedat:  payload.startedAt,
-        timestamp:  payload.timestamp
-        // ✅ New MTF Bias Fields (safely defaults to null)
+        timestamp:  payload.timestamp,
         version:     payload.version     || null,
         biashtf1:    payload.biasHTF1    ?? null,
         biashtf2:    payload.biasHTF2    ?? null,
