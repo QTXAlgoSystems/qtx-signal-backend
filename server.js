@@ -72,7 +72,7 @@ app.post("/webhook", async (req, res) => {
   if (isEntry) {
     // 1) auto-close opposite trades
     const [ sym, tf ] = id.split("_");
-    const { data: openOpposites, error: fetchOppErr } = await supabase
+    const {  openOpposites, error: fetchOppErr } = await supabase
       .from("signals")
       .select("*")
       .eq("timeframe", tf)
@@ -145,7 +145,7 @@ app.post("/webhook", async (req, res) => {
     }
     
     // ✅ Deduplication check: prevent duplicate open trade_id entries
-    const { data: existingOpen, error: existingErr } = await supabase
+    const {  existingOpen, error: existingErr } = await supabase
       .from("signals")
       .select("uid")
       .eq("trade_id", id)
@@ -195,6 +195,20 @@ app.post("/webhook", async (req, res) => {
     .eq("trade_id", id)
     .is("closedat", null)
     .limit(1);
+
+  const existing = existingArr[0];
+
+  // 🚫 If already closed, ignore further updates
+  if (existing.closedat) {
+    console.warn(`⚠️ Trade ${id} is already closed, skipping update`);
+    return res.status(200).json({ ignored: true });
+  }
+  
+  // 🚫 If SL was already hit, block any TP updates
+  if (existing.slhit && (payload.tp1Hit || payload.tp2Hit)) {
+    console.warn(`⛔ SL already hit for ${id}, ignoring TP update`);
+    return res.status(200).json({ ignored: true });
+  }
 
   if (selectErr) {
     console.error("❌ SELECT error:", selectErr);
