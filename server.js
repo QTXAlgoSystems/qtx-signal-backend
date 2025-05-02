@@ -72,7 +72,7 @@ app.post("/webhook", async (req, res) => {
   if (isEntry) {
     // 1) auto-close opposite trades
     const [ sym, tf ] = id.split("_");
-    const {  openOpposites, error: fetchOppErr } = await supabase
+    const { data: openOpposites, error: fetchOppErr } = await supabase
       .from("signals")
       .select("*")
       .eq("timeframe", tf)
@@ -145,7 +145,7 @@ app.post("/webhook", async (req, res) => {
     }
     
     // ✅ Deduplication check: prevent duplicate open trade_id entries
-    const {  existingOpen, error: existingErr } = await supabase
+    const { data: existingOpen, error: existingErr } = await supabase
       .from("signals")
       .select("uid")
       .eq("trade_id", id)
@@ -377,7 +377,6 @@ app.post("/webhook", async (req, res) => {
 
 
   // ── FINAL CLOSE: both TP1+TP2 ──
-  const existing = existingArr[0];
   if (existing.tp1hit && existing.tp2hit && !existing.closedat) {
     const avgExit = (existing.tp1price + existing.tp2price) / 2;
     const { error: closeErr } = await supabase
