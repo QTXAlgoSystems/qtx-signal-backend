@@ -208,9 +208,18 @@ app.post("/webhook", async (req, res) => {
     .eq("trade_id", id)
     .is("closedat", null)
     .limit(1);
-
+  
+  if (selectErr) {
+    console.error("❌ SELECT error:", selectErr);
+    return res.status(500).json({ error: "DB select failed" });
+  }
+  if (existingArr.length === 0) {
+    console.warn(`⚠️ Unknown trade ID: ${id}`);
+    return res.status(404).json({ error: "Trade not found" });
+  }
+  
   const existing = existingArr[0];
-
+  
   // 🚫 If already closed, ignore further updates
   if (existing.closedat) {
     console.warn(`⚠️ Trade ${id} is already closed, skipping update`);
@@ -221,15 +230,6 @@ app.post("/webhook", async (req, res) => {
   if (existing.slhit && (payload.tp1Hit || payload.tp2Hit)) {
     console.warn(`⛔ SL already hit for ${id}, ignoring TP update`);
     return res.status(200).json({ ignored: true });
-  }
-
-  if (selectErr) {
-    console.error("❌ SELECT error:", selectErr);
-    return res.status(500).json({ error: "DB select failed" });
-  }
-  if (existingArr.length === 0) {
-    console.warn(`⚠️ Unknown trade ID: ${id}`);
-    return res.status(404).json({ error: "Trade not found" });
   }
 
   // ── STOP-LOSS (final close) ──
