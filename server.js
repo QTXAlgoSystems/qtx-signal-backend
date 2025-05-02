@@ -46,6 +46,19 @@ function calculatePnl(entryPrice, exitPrice, direction) {
   return raw.toFixed(3);
 }
 
+// Helper to sanitize payload (removes NaN/undefined values)
+function sanitizePayload(obj) {
+  const clean = {};
+  for (const key in obj) {
+    const val = obj[key];
+    // Keep only values that are not undefined or NaN
+    if (val !== undefined && !(typeof val === "number" && isNaN(val))) {
+      clean[key] = val;
+    }
+  }
+  return clean;
+}
+
 app.post("/webhook", async (req, res) => {
   console.log("[RAW]", JSON.stringify(req.body));
   const token = req.query.token;
@@ -53,7 +66,7 @@ app.post("/webhook", async (req, res) => {
     return res.status(403).json({ error: "Invalid token" });
   }
 
-  const payload = req.body;
+  let payload = sanitizePayload(req.body);
   if (payload.tp1Hit || payload.tp2Hit || payload.slHit) {
     payload.closedAt = new Date().toISOString();
   }
