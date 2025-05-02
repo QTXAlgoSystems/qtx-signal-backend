@@ -270,6 +270,26 @@ app.post("/webhook", async (req, res) => {
       console.log(`✅ Trade closed (TP1 + TP2) for: ${id} @ ${payload.closedAt}`);
     }
   
+    // 🔁 Fallback: TP2 was already hit but final-close never happened
+    const freshTP2 = existing.tp2hit && !existing.closedat;
+    if (freshTP2) {
+      const avgExit = (payload.tp1Price + existing.tp2price) / 2;
+      const { error: fallbackErr } = await supabase
+        .from("signals")
+        .update({
+          closedat:   payload.closedAt,
+          pnlpercent: calculatePnl(
+                         existing.entryprice,
+                         avgExit,
+                         existing.direction
+                       )
+        })
+        .eq("trade_id", id)
+        .is("closedat", null);
+      if (fallbackErr) console.error("❌ Fallback close from TP1 block failed:", fallbackErr);
+      else console.log(`✅ Fallback close applied from TP1 block: ${id}`);
+    }
+  
     // 3) stop further processing in this request
     return res.json({ success: true });
   }
@@ -317,9 +337,30 @@ app.post("/webhook", async (req, res) => {
       console.log(`✅ Trade closed (TP1 + TP2) for: ${id} @ ${payload.closedAt}`);
     }
   
+    // Fallback: If TP1 already hit but trade never closed (TP1 came first)
+    const freshTP1 = existing.tp1hit && !existing.closedat;
+    if (freshTP1) {
+      const avgExit = (existing.tp1price + payload.tp2Price) / 2;
+      const { error: fallbackErr } = await supabase
+        .from("signals")
+        .update({
+          closedat:   payload.closedAt,
+          pnlpercent: calculatePnl(
+                         existing.entryprice,
+                         avgExit,
+                         existing.direction
+                       )
+        })
+        .eq("trade_id", id)
+        .is("closedat", null);
+      if (fallbackErr) console.error("❌ Fallback close from TP2 block failed:", fallbackErr);
+      else console.log(`✅ Fallback close applied from TP2 block: ${id}`);
+    }
+  
     // 3) stop further processing in this request
     return res.json({ success: true });
   }
+
 
   // ── FINAL CLOSE: both TP1+TP2 ──
   const existing = existingArr[0];
