@@ -91,8 +91,10 @@ app.post("/webhook", async (req, res) => {
       .eq("timeframe", tf)
       .eq("direction", payload.direction === "LONG" ? "SHORT" : "LONG")
       .like("trade_id", `${sym}_${tf}_%`)
-      .is("closedat", null);
-    
+      .is("closedat", null)
+      .order("startedat", { ascending: false }) // use "timestamp" if that's more accurate
+      .limit(1); // only close the most recent matching trade
+
     if (fetchOppErr) {
       console.error("❌ Failed to fetch opposite trades:", fetchOppErr);
     } else {
