@@ -149,7 +149,7 @@ app.post("/webhook", async (req, res) => {
         const { error: closeErr } = await supabase
           .from("signals")
           .update(updatePayload)
-          .eq("trade_id", trade.trade_id);
+          .eq("uid", trade.uid)
     
         if (closeErr) {
           console.error("❌ Auto-close update error:", closeErr);
