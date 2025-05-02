@@ -98,13 +98,13 @@ app.post("/webhook", async (req, res) => {
     if (fetchOppErr) {
       console.error("❌ Failed to fetch opposite trades:", fetchOppErr);
     } else {
-      for (const trade of openOpposites) {
-        // ⛔ Don't update if SL was already hit
-        if (trade.slhit) {
-          console.log(`⚠️ Skipping auto-close for ${trade.trade_id} — SL already hit`);
-          continue;
-        }
+      const trade = openOpposites?.[0]; // only one trade now due to .limit(1)
     
+      if (!trade) {
+        console.log("ℹ️ No opposite trade found to auto-close");
+      } else if (trade.slhit) {
+        console.log(`⚠️ Skipping auto-close for ${trade.trade_id} — SL already hit`);
+      } else {
         const updatePayload = {
           closedat: payload.timestamp
         };
@@ -158,6 +158,7 @@ app.post("/webhook", async (req, res) => {
         }
       }
     }
+
     
     // ✅ Deduplication check: prevent duplicate open trade_id entries
     const { data: existingOpen, error: existingErr } = await supabase
