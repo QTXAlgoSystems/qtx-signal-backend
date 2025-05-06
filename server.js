@@ -83,17 +83,30 @@ app.post("/webhook", async (req, res) => {
 
   // ── ENTRY: insert new signal ───────────────────────────────
   if (isEntry) {
-    // 1) auto-close opposite trades
-    const [ sym, tf ] = id.split("_");
+    // 1) parse & normalize the raw tf string into numeric minutes
+    const [ sym, tfRaw ] = id.split("_");
+    let timeframe;
+    if (tfRaw.endsWith("W")) {
+      // “nW” → n * 7 * 24 * 60 minutes
+      timeframe = parseInt(tfRaw, 10) * 7 * 24 * 60;
+    } else if (tfRaw.endsWith("D")) {
+      // “nD” → n * 24 * 60 minutes
+      timeframe = parseInt(tfRaw, 10) * 24 * 60;
+    } else {
+      // e.g. “1”, “15”, “60” → already minutes
+      timeframe = parseInt(tfRaw, 10);
+    }
+  
+    // 2) auto-close opposite trades using the numeric timeframe
     const { data: openOpposites, error: fetchOppErr } = await supabase
       .from("signals")
       .select("*")
-      .eq("timeframe", tf)
+      .eq("timeframe", timeframe)
       .eq("direction", payload.direction === "LONG" ? "SHORT" : "LONG")
-      .like("trade_id", `${sym}_${tf}_%`)
+      .like("trade_id", `${sym}_${tfRaw}_%`)
       .is("closedat", null)
-      .order("startedat", { ascending: false }) // use "timestamp" if that's more accurate
-      .limit(1); // only close the most recent matching trade
+      .order("startedat", { ascending: false })
+      .limit(1);
 
     if (fetchOppErr) {
       console.error("❌ Failed to fetch opposite trades:", fetchOppErr);
@@ -180,7 +193,7 @@ app.post("/webhook", async (req, res) => {
       .from("signals")
       .insert([{
         trade_id:   id,               // ← write into trade_id, not id
-        timeframe:  tf, 
+        timeframe:  timeframe, 
         setup:      payload.tradeType,
         direction:  payload.direction,
         entryprice: payload.entryPrice,
