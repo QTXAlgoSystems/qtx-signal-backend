@@ -119,8 +119,11 @@ app.post("/webhook", async (req, res) => {
         console.log(`⚠️ Skipping auto-close for ${trade.trade_id} — SL already hit`);
       } else {
         const updatePayload = {
-          closedat: payload.timestamp
+          closedat: payload.timestamp,
+          auto_closed: true, // ✅ new field
+          close_reason: 'auto-opposite' // ✅ optional, more descriptive
         };
+
     
         // ✅ Only update TP1 if not already hit
         if (!trade.tp1hit) {
@@ -437,7 +440,7 @@ app.get("/api/latest-signals", async (req, res) => {
     .select("*")
     .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
     .order("timestamp", { ascending: false })
-    .limit(100); // cap to 100 results to prevent overload
+    .limit(200); // cap to 200 results to prevent overload
 
   if (error) {
     console.error("❌ Supabase SELECT error:", error);
