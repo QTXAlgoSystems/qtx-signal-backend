@@ -254,22 +254,31 @@ app.post("/webhook", async (req, res) => {
   // ── STOP-LOSS (final close) ──
   if (payload.slHit) {
     const existing = existingArr[0];
+  
+    // Determine close_reason
+    let reason = "sl";
+    if (existing.tp1hit || existing.tp2hit) {
+      reason = "sl-after-partial";
+    }
+  
     const { error: slErr } = await supabase
       .from("signals")
       .update({
-        slhit:      true,
-        slprice:    payload.slPrice,
-        closedat:   payload.closedAt || payload.timestamp,
-        pnlpercent: calculatePnl(
-                       existing.entryprice,
-                       payload.slPrice,
-                       existing.direction
-                     )
+        slhit:        true,
+        slprice:      payload.slPrice,
+        closedat:     payload.closedAt || payload.timestamp,
+        pnlpercent:   calculatePnl(
+                        existing.entryprice,
+                        payload.slPrice,
+                        existing.direction
+                      ),
+        close_reason: reason
       })
       .eq("trade_id", id)
       .is("closedat", null);
+  
     if (slErr) console.error("❌ SL update error:", slErr);
-    console.log(`🔒 SL closed trade: ${id}`);
+    console.log(`🔒 SL closed trade: ${id} | Reason: ${reason}`);
     return res.json({ success: true });
   }
 
