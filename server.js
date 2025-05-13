@@ -208,6 +208,7 @@ app.post("/webhook", async (req, res) => {
         version:     payload.version     || null,
         biashtf1:    payload.biasHTF1    ?? null,
         biashtf2:    payload.biasHTF2    ?? null,
+        biashtf3:    payload.biasHTF3    ?? null,
         htf_logic:   payload.htfLogic    || null,
       }], { returning: "minimal" });
   
