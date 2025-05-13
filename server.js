@@ -59,6 +59,22 @@ function sanitizePayload(obj) {
   return clean;
 }
 
+function getTierFromStats(stats) {
+  if (!stats) return "base";
+  const winRate = stats.winRate ?? 0;
+  const profitFactor = stats.profitFactor ?? 0;
+
+  if (winRate >= 0.7 && profitFactor >= 4.0) return "elite";
+
+  const wrScore = winRate * 100;
+  const pfScore = profitFactor * 10;
+  const blended = wrScore * 0.65 + pfScore * 0.35;
+
+  if (blended >= 55) return "great";
+  if (blended >= 45) return "good";
+  return "base";
+}
+
 app.post("/webhook", async (req, res) => {
   console.log("[RAW]", JSON.stringify(req.body));
   const token = req.query.token;
@@ -190,7 +206,25 @@ app.post("/webhook", async (req, res) => {
       console.warn(`⚠️ Duplicate open trade detected for ${id}, skipping insert`);
       return res.status(200).json({ ignored: true });
     }
+
+    // 💡 Determine verified setup match (same logic as frontend)
+    const verifiedMatch = await supabase
+      .from("verified_setups")
+      .select("*")
+      .eq("symbol", sym)
+      .eq("timeframe", timeframe)
+      .eq("setup", payload.tradeType)
+      .maybeSingle(); // if you expect only one match
     
+    const statsForTier = verifiedMatch.data
+      ? {
+          winRate: verifiedMatch.data.win_rate ?? 0,
+          profitFactor: verifiedMatch.data.profit_factor ?? 0,
+        }
+      : null;
+    
+    const tier = getTierFromStats(statsForTier); // 🟨 Compute final tier
+        
     // 2) now insert the new entry
     const { error: insertErr } = await supabase
       .from("signals")
@@ -210,6 +244,7 @@ app.post("/webhook", async (req, res) => {
         biashtf2:    payload.biasHTF2    ?? null,
         biashtf3:    payload.biasHTF3    ?? null,
         htf_logic:   payload.htfLogic    || null,
+        tier 
       }], { returning: "minimal" });
   
     if (insertErr) {
