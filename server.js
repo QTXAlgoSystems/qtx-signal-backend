@@ -330,10 +330,11 @@ app.post("/webhook", async (req, res) => {
         tp1price:   payload.tp1Price,
         tp1time:    payload.closedAt,
         tp1percent: calculatePnl(
-                       existing.entryprice,
-                       payload.tp1Price,
-                       existing.direction
-                     )
+          parseFloat(existing.entryprice),
+          parseFloat(payload.tp1Price),
+          existing.direction
+        )
+
       })
       .eq("trade_id", id)
       .is("closedat", null);
@@ -343,7 +344,9 @@ app.post("/webhook", async (req, res) => {
   
     // 2) if TP2 already fired, do the final-close now
     if (existing.tp2hit) {
-      const avgExit = (payload.tp1Price + existing.tp2price) / 2;
+      const tp1 = parseFloat(payload.tp1Price);
+      const tp2 = parseFloat(existing.tp2price);
+      const avgExit = (tp1 + tp2) / 2;  
       const { error: fcErr } = await supabase
         .from("signals")
         .update({
@@ -364,7 +367,9 @@ app.post("/webhook", async (req, res) => {
     // 🔁 Fallback: TP2 was already hit but final-close never happened
     const freshTP2 = existing.tp2hit && !existing.closedat;
     if (freshTP2) {
-      const avgExit = (payload.tp1Price + existing.tp2price) / 2;
+      const tp1 = parseFloat(payload.tp1Price);
+      const tp2 = parseFloat(existing.tp2price);
+      const avgExit = (tp1 + tp2) / 2;
       const { error: fallbackErr } = await supabase
         .from("signals")
         .update({
@@ -410,7 +415,9 @@ app.post("/webhook", async (req, res) => {
   
     // 2) if TP1 already fired, do the final-close now
     if (existing.tp1hit) {
-      const avgExit = (existing.tp1price + payload.tp2Price) / 2;
+      const tp1 = parseFloat(existing.tp1price);
+      const tp2 = parseFloat(payload.tp2Price);
+      const avgExit = (tp1 + tp2) / 2;
       const { error: fcErr } = await supabase
         .from("signals")
         .update({
@@ -431,7 +438,9 @@ app.post("/webhook", async (req, res) => {
     // Fallback: If TP1 already hit but trade never closed (TP1 came first)
     const freshTP1 = existing.tp1hit && !existing.closedat;
     if (freshTP1) {
-      const avgExit = (existing.tp1price + payload.tp2Price) / 2;
+      const tp1 = parseFloat(existing.tp1price);
+      const tp2 = parseFloat(payload.tp2Price);
+      const avgExit = (tp1 + tp2) / 2;
       const { error: fallbackErr } = await supabase
         .from("signals")
         .update({
@@ -455,7 +464,9 @@ app.post("/webhook", async (req, res) => {
 
   // ── FINAL CLOSE: both TP1+TP2 ──
   if (existing.tp1hit && existing.tp2hit && !existing.closedat) {
-    const avgExit = (existing.tp1price + existing.tp2price) / 2;
+    const tp1 = parseFloat(existing.tp1price);
+    const tp2 = parseFloat(existing.tp2price);
+    const avgExit = (tp1 + tp2) / 2;
     const { error: closeErr } = await supabase
       .from("signals")
       .update({
