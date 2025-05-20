@@ -136,10 +136,9 @@ app.post("/webhook", async (req, res) => {
       } else {
         const updatePayload = {
           closedat: payload.timestamp,
-          auto_closed: true, // ✅ new field
-          close_reason: 'auto-opposite' // ✅ optional, more descriptive
+          auto_closed: true,
+          close_reason: (trade.tp1hit && trade.tp2hit) ? 'tp1+tp2' : 'auto-opposite'
         };
-
     
         // ✅ Only update TP1 if not already hit
         if (!trade.tp1hit) {
