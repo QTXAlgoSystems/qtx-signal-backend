@@ -90,9 +90,6 @@ app.post("/webhook", async (req, res) => {
     console.warn("⛔ Bad or missing ID, payload skipped:", payload);
     return res.status(400).end();
   }
-  if (!payload.) {
-    payload. = new Date().toISOString();
-  }
 
   const id      = payload.id.trim();
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
