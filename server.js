@@ -90,8 +90,8 @@ app.post("/webhook", async (req, res) => {
     console.warn("⛔ Bad or missing ID, payload skipped:", payload);
     return res.status(400).end();
   }
-  if (!payload.timestamp) {
-    payload.timestamp = new Date().toISOString();
+  if (!payload.) {
+    payload. = new Date().toISOString();
   }
 
   const id      = payload.id.trim();
@@ -135,7 +135,7 @@ app.post("/webhook", async (req, res) => {
         console.log(`⚠️ Skipping auto-close for ${trade.trade_id} — SL already hit`);
       } else {
         const updatePayload = {
-          closedat: payload.timestamp,
+          closedat: payload.,
           auto_closed: true,
           close_reason: (trade.tp1hit && trade.tp2hit) ? 'tp1+tp2' : 'auto-opposite'
         };
@@ -144,7 +144,7 @@ app.post("/webhook", async (req, res) => {
         if (!trade.tp1hit) {
           updatePayload.tp1hit = true;
           updatePayload.tp1price = payload.entryPrice;
-          updatePayload.tp1time = payload.timestamp;
+          updatePayload.tp1time = payload.;
           updatePayload.tp1percent = calculatePnl(
             trade.entryprice,
             payload.entryPrice,
@@ -487,22 +487,14 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.get("/api/latest-signals", async (req, res) => {
-  // 10-minute lookback for closed trades
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-
-  const { data, error } = await supabase
-    .from("signals_with_ratio")           // ← use our new view
-    .select("*, ratio_bucket")            // ← ensure ratio_bucket comes back
-    .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
-    .order("timestamp", { ascending: false })
-    .limit(250);
+  const { data, error } = await supabase.rpc("get_latest_signals_with_bucket");
 
   if (error) {
-    console.error("❌ Supabase SELECT error:", error);
+    console.error("❌ Supabase RPC error:", error);
     return res.status(500).json({ error: "Database error" });
   }
 
-  console.log("📤 Returning", data.length, "signals (with ratio_bucket)");
+  console.log("📤 Returning", data.length, "signals (with buckets)");
   res.json(data);
 });
 
