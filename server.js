@@ -487,15 +487,15 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.get("/api/latest-signals", async (req, res) => {
-  // Pull only open or recently closed signals (last 10 minutes), newest first
+  // 10-minute lookback for closed trades
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
-    .from("signals_with_ratio")         // ← read from the new view
-    .select("*, ratio_bucket")          // ← include the ratio_bucket column
+    .from("signals_with_ratio")           // ← use our new view
+    .select("*, ratio_bucket")            // ← ensure ratio_bucket comes back
     .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
     .order("timestamp", { ascending: false })
-    .limit(200); // cap to 200 results to prevent overload
+    .limit(250);
 
   if (error) {
     console.error("❌ Supabase SELECT error:", error);
