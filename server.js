@@ -491,8 +491,8 @@ app.get("/api/latest-signals", async (req, res) => {
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
-    .from("signals")
-    .select("*")
+    .from("signals_with_ratio")         // ← read from the new view
+    .select("*, ratio_bucket")          // ← include the ratio_bucket column
     .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
     .order("timestamp", { ascending: false })
     .limit(200); // cap to 200 results to prevent overload
@@ -502,7 +502,7 @@ app.get("/api/latest-signals", async (req, res) => {
     return res.status(500).json({ error: "Database error" });
   }
 
-  console.log("📤 Returning", data.length, "signals (limited to active + recent)");
+  console.log("📤 Returning", data.length, "signals (with ratio_bucket)");
   res.json(data);
 });
 
