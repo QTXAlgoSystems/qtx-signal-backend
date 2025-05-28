@@ -83,9 +83,15 @@ app.post("/webhook", async (req, res) => {
   }
 
   let payload = sanitizePayload(req.body);
+
+  // ✅ Always ensure timestamp exists
+  payload.timestamp = payload.timestamp || new Date().toISOString();
+  
+  // ✅ Assign closedAt only if it’s an exit signal
   if (payload.tp1Hit || payload.tp2Hit || payload.slHit) {
     payload.closedAt = new Date().toISOString();
   }
+
   if (!payload.id || payload.id.includes("undefined")) {
     console.warn("⛔ Bad or missing ID, payload skipped:", payload);
     return res.status(400).end();
