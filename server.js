@@ -489,23 +489,28 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.get("/api/latest-signals", async (req, res) => {
-  // 10-minute lookback for closed trades
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  try {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    console.log("🧠 tenMinutesAgo =", tenMinutesAgo);
 
-  const { data, error } = await supabase
-    .from("signals_with_ratio") // ✅ New view with ratio_bucket
-    .select("*")                // ✅ Select all columns including ratio_bucket
-    .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`) // ✅ Show open + recently closed
-    .order("timestamp", { ascending: false })
-    .limit(250);
+    const { data, error } = await supabase
+      .from("signals_with_ratio")
+      .select("*")
+      .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
+      .order("timestamp", { ascending: false })
+      .limit(250);
 
-  if (error) {
-    console.error("❌ Supabase SELECT error:", error);
-    return res.status(500).json({ error: "Database error" });
+    if (error) {
+      console.error("❌ Supabase SELECT error:", error);
+      return res.status(500).json({ error: "Database error", details: error.message });
+    }
+
+    console.log("✅ Supabase returned", data.length, "rows");
+    res.json(data);
+  } catch (e) {
+    console.error("🔥 Caught unexpected error in latest-signals:", e);
+    return res.status(500).json({ error: "Unexpected error", message: e.message });
   }
-
-  console.log("📤 Returning", data.length, "signals (with ratio_bucket)");
-  res.json(data);
 });
 
 app.listen(PORT, () => {
