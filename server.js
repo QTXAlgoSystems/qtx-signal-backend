@@ -90,6 +90,9 @@ app.post("/webhook", async (req, res) => {
     console.warn("⛔ Bad or missing ID, payload skipped:", payload);
     return res.status(400).end();
   }
+  if (!payload.) {
+    payload. = new Date().toISOString();
+  }
 
   const id      = payload.id.trim();
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
@@ -484,14 +487,22 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.get("/api/latest-signals", async (req, res) => {
-  const { data, error } = await supabase.rpc("get_latest_signals_with_bucket");
+  // 10-minute lookback for closed trades
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from("signals_with_ratio")           // ← use our new view
+    .select("*, ratio_bucket")            // ← ensure ratio_bucket comes back
+    .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
+    .order("timestamp", { ascending: false })
+    .limit(250);
 
   if (error) {
-    console.error("❌ Supabase RPC error:", error);
+    console.error("❌ Supabase SELECT error:", error);
     return res.status(500).json({ error: "Database error" });
   }
 
-  console.log("📤 Returning", data.length, "signals (with buckets)");
+  console.log("📤 Returning", data.length, "signals (with ratio_bucket)");
   res.json(data);
 });
 
