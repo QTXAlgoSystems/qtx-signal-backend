@@ -90,9 +90,6 @@ app.post("/webhook", async (req, res) => {
     console.warn("⛔ Bad or missing ID, payload skipped:", payload);
     return res.status(400).end();
   }
-  if (!payload.) {
-    payload. = new Date().toISOString();
-  }
 
   const id      = payload.id.trim();
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
@@ -135,16 +132,15 @@ app.post("/webhook", async (req, res) => {
         console.log(`⚠️ Skipping auto-close for ${trade.trade_id} — SL already hit`);
       } else {
         const updatePayload = {
-          closedat: payload.,
+          closedat: payload.closedAt || payload.timestamp,
           auto_closed: true,
           close_reason: (trade.tp1hit && trade.tp2hit) ? 'tp1+tp2' : 'auto-opposite'
         };
-    
-        // ✅ Only update TP1 if not already hit
+        
         if (!trade.tp1hit) {
           updatePayload.tp1hit = true;
           updatePayload.tp1price = payload.entryPrice;
-          updatePayload.tp1time = payload.;
+          updatePayload.tp1time = payload.closedAt || payload.timestamp;
           updatePayload.tp1percent = calculatePnl(
             trade.entryprice,
             payload.entryPrice,
@@ -491,9 +487,9 @@ app.get("/api/latest-signals", async (req, res) => {
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
-    .from("signals_with_ratio")           // ← use our new view
-    .select("*, ratio_bucket")            // ← ensure ratio_bucket comes back
-    .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
+    .from("signals_with_ratio") // ✅ New view with ratio_bucket
+    .select("*")                // ✅ Select all columns including ratio_bucket
+    .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`) // ✅ Show open + recently closed
     .order("timestamp", { ascending: false })
     .limit(250);
 
