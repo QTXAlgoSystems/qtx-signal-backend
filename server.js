@@ -493,6 +493,12 @@ app.get("/api/latest-signals", async (req, res) => {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     console.log("🧠 tenMinutesAgo =", tenMinutesAgo);
 
+    // ✅ Set timeout override
+    await supabase.rpc("set_config", {
+      key: "statement_timeout",
+      value: "15000"
+    });
+
     const { data, error } = await supabase
       .from("signals_with_ratio")
       .select("*")
@@ -505,13 +511,13 @@ app.get("/api/latest-signals", async (req, res) => {
       return res.status(500).json({ error: "Database error", details: error.message });
     }
 
-    console.log("✅ Supabase returned", data.length, "rows");
     res.json(data);
   } catch (e) {
     console.error("🔥 Caught unexpected error in latest-signals:", e);
     return res.status(500).json({ error: "Unexpected error", message: e.message });
   }
 });
+
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
