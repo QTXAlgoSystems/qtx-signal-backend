@@ -483,8 +483,7 @@ app.post("/webhook", async (req, res) => {
     if (closeErr) console.error("❌ Final-close error:", closeErr);
     console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
   }
-
-
+  
   return res.json({ success: true });
 });
 
@@ -493,28 +492,51 @@ app.get("/api/latest-signals", async (req, res) => {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     console.log("🧠 tenMinutesAgo =", tenMinutesAgo);
 
-    // ✅ Set timeout override
     await supabase.rpc("set_config", {
       key: "statement_timeout",
       value: "15000"
     });
 
-    const { data, error } = await supabase
-      .from("latest_signals_with_bucket_cache")
-      .select("*");
-    
-    if (error) {
-      console.error("❌ Supabase SELECT error:", error);
-      return res.status(500).json({ error: "Database error", details: error.message });
+    // Step 1: Pull live signals (up to 50 most recent open or recent trades)
+    const { data: realtimeData, error: realtimeError } = await supabase
+      .from("signals_realtime")
+      .select("*")
+      .order("timestamp", { ascending: false })
+      .limit(50);
+
+    if (realtimeError) {
+      console.error("❌ Realtime fetch error:", realtimeError);
     }
 
-    res.json(data);
+    // Step 2: Pull cached signals for the remaining data
+    const { data: cachedData, error: cachedError } = await supabase
+      .from("latest_signals_with_bucket_cache")
+      .select("*")
+      .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
+      .order("timestamp", { ascending: false })
+      .limit(250);
+
+    if (cachedError) {
+      console.error("❌ Cached fetch error:", cachedError);
+    }
+
+    // Combine and dedupe based on unique UID
+    const mergedMap = new Map();
+    [...(cachedData || []), ...(realtimeData || [])].forEach(t => {
+      const uid = `${t.trade_id}_${t.timestamp}`;
+      mergedMap.set(uid, t); // Realtime will overwrite cached if present
+    });
+
+    const finalSignals = Array.from(mergedMap.values())
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 250);
+
+    res.json(finalSignals);
   } catch (e) {
-    console.error("🔥 Caught unexpected error in latest-signals:", e);
-    return res.status(500).json({ error: "Unexpected error", message: e.message });
+    console.error("🔥 Unexpected error in latest-signals:", e);
+    res.status(500).json({ error: "Unexpected error", message: e.message });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
