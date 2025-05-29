@@ -492,11 +492,6 @@ app.get("/api/latest-signals", async (req, res) => {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     console.log("🧠 tenMinutesAgo =", tenMinutesAgo);
 
-    await supabase.rpc("set_config", {
-      key: "statement_timeout",
-      value: "15000"
-    });
-
     // Step 1: Pull live signals (up to 50 most recent open or recent trades)
     const { data: realtimeData, error: realtimeError } = await supabase
       .from("signals_realtime")
@@ -508,14 +503,17 @@ app.get("/api/latest-signals", async (req, res) => {
       console.error("❌ Realtime fetch error:", realtimeError);
     }
 
+    // Set timeout only before cached fetch
+    await supabase.rpc("set_config", {
+      key: "statement_timeout",
+      value: "15000"
+    });
+    
     // Step 2: Pull cached signals for the remaining data
     const { data: cachedData, error: cachedError } = await supabase
       .from("latest_signals_with_bucket_cache")
-      .select("*")
-      .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
-      .order("timestamp", { ascending: false })
-      .limit(250);
-
+      .select("*");
+    
     if (cachedError) {
       console.error("❌ Cached fetch error:", cachedError);
     }
