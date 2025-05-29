@@ -500,12 +500,9 @@ app.get("/api/latest-signals", async (req, res) => {
     });
 
     const { data, error } = await supabase
-      .from("signals_with_ratio")
-      .select("*")
-      .or(`closedat.is.null,closedat.gt.${tenMinutesAgo}`)
-      .order("timestamp", { ascending: false })
-      .limit(250);
-
+      .from("latest_signals_with_bucket_cache")
+      .select("*");
+    
     if (error) {
       console.error("❌ Supabase SELECT error:", error);
       return res.status(500).json({ error: "Database error", details: error.message });
