@@ -520,9 +520,10 @@ app.get("/api/latest-signals", async (req, res) => {
 
     // Combine and dedupe based on unique UID
     const mergedMap = new Map();
-    [...(cachedData || []), ...(realtimeData || [])].forEach(t => {
+    // ✅ Cache second — it contains stopLoss and entryPrice
+    [...(realtimeData || []), ...(cachedData || [])].forEach(t => {
       const uid = `${t.trade_id}_${t.timestamp}`;
-      mergedMap.set(uid, t); // Realtime will overwrite cached if present
+      mergedMap.set(uid, t); // cachedData wins
     });
 
     const finalSignals = Array.from(mergedMap.values())
