@@ -188,6 +188,7 @@ app.post("/webhook", async (req, res) => {
           console.error("❌ Auto-close update error:", closeErr);
         } else {
           console.log(`🔁 Auto-closed trade ${trade.trade_id} with protected TP/SL logic`);
+          console.log(`↪️ Auto-close reason: ${updatePayload.close_reason} | UID: ${trade.uid}`);
         }
       }
     }
@@ -204,27 +205,29 @@ app.post("/webhook", async (req, res) => {
     if (existingErr) {
       console.error("❌ Error checking for duplicate trade:", existingErr);
     } else if (existingOpen.length > 0) {
-      console.warn(`⚠️ Duplicate open trade detected for ${id}, skipping insert`);
+      console.warn(`⚠️ Duplicate trade skipped: ${id} | UID would be: ${id}_${payload.timestamp}`);
       return res.status(200).json({ ignored: true });
     }
 
     // 💡 Determine verified setup match (same logic as frontend)
-    const verifiedMatch = await supabase
+    const { data: verifiedMatch } = await supabase
       .from("verified_setups")
       .select("*")
-      .eq("symbol", sym)
+      .or(`symbol.eq.${sym},proxy_symbol.eq.${sym}`)
       .eq("timeframe", timeframe)
       .eq("setup", payload.tradeType)
-      .maybeSingle(); // if you expect only one match
+      .maybeSingle();
     
-    const statsForTier = verifiedMatch.data
+    const statsForTier = verifiedMatch
       ? {
-          winRate: verifiedMatch.data.win_rate ?? 0,
-          profitFactor: verifiedMatch.data.profit_factor ?? 0,
+          winRate: verifiedMatch.win_rate ?? 0,
+          profitFactor: verifiedMatch.profit_factor ?? 0,
         }
       : null;
-    
+        
     const tier = getTierFromStats(statsForTier); // 🟨 Compute final tier
+
+    console.log(`📊 Entry tier: ${tier} | HTF Logic: ${payload.htfLogic || "none"}`);
         
     // 2) now insert the new entry
     const { error: insertErr } = await supabase
@@ -270,7 +273,7 @@ app.post("/webhook", async (req, res) => {
     return res.status(500).json({ error: "DB select failed" });
   }
   if (existingArr.length === 0) {
-    console.warn(`⚠️ Unknown trade ID: ${id}`);
+    console.warn(`⚠️ Unknown trade ID: ${id} | Payload:`, payload);
     return res.status(404).json({ error: "Trade not found" });
   }
   
@@ -504,7 +507,7 @@ app.post("/webhook", async (req, res) => {
       .is("closedat", null);
   
     if (safeguardErr) console.error("❌ Safeguard close error:", safeguardErr);
-    else console.log(`✅ Safeguard final-close written for: ${id}`);
+    else console.log(`✅ Safeguard final-close for: ${id} | TP1: ${tp1} | TP2: ${tp2}`);
   }
     
   return res.json({ success: true });
@@ -553,6 +556,10 @@ app.get("/api/latest-signals", async (req, res) => {
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, 250);
 
+    console.log(`📥 Realtime signals: ${realtimeData?.length || 0}`);
+    console.log(`📦 Cached signals: ${cachedData?.length || 0}`);
+    console.log(`📊 Final signals returned: ${finalSignals.length}`);
+  
     res.json(finalSignals);
   } catch (e) {
     console.error("🔥 Unexpected error in latest-signals:", e);
