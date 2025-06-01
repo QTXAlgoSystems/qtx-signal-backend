@@ -483,7 +483,30 @@ app.post("/webhook", async (req, res) => {
     if (closeErr) console.error("❌ Final-close error:", closeErr);
     console.log(`✅ Trade closed (TP1 + TP2): ${id}`);
   }
+
+  // ✅ Final safeguard: close if both TP1 and TP2 are now hit
+  if (!existing.closedat && (
+      (payload.tp1Hit && existing.tp2hit) ||
+      (payload.tp2Hit && existing.tp1hit) ||
+      (payload.tp1Hit && payload.tp2Hit) // rare but possible
+    )) {
+    const tp1 = payload.tp1Price || existing.tp1price;
+    const tp2 = payload.tp2Price || existing.tp2price;
+    const avgExit = (parseFloat(tp1) + parseFloat(tp2)) / 2;
   
+    const { error: safeguardErr } = await supabase
+      .from("signals")
+      .update({
+        closedat: payload.closedAt || payload.timestamp,
+        pnlpercent: calculatePnl(existing.entryprice, avgExit, existing.direction)
+      })
+      .eq("trade_id", id)
+      .is("closedat", null);
+  
+    if (safeguardErr) console.error("❌ Safeguard close error:", safeguardErr);
+    else console.log(`✅ Safeguard final-close written for: ${id}`);
+  }
+    
   return res.json({ success: true });
 });
 
