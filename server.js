@@ -515,52 +515,19 @@ app.post("/webhook", async (req, res) => {
 
 app.get("/api/latest-signals", async (req, res) => {
   try {
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    console.log("🧠 tenMinutesAgo =", tenMinutesAgo);
-
-    // Step 1: Pull live signals (up to 50 most recent open or recent trades)
-    const { data: realtimeData, error: realtimeError } = await supabase
+    const { data: signals, error } = await supabase
       .from("signals_realtime")
       .select("*")
       .order("timestamp", { ascending: false })
-      .limit(50);
+      .limit(250);
 
-    if (realtimeError) {
-      console.error("❌ Realtime fetch error:", realtimeError);
+    if (error) {
+      console.error("❌ Fetch error:", error);
+      return res.status(500).json({ error: "Failed to fetch signals" });
     }
 
-    // Set timeout only before cached fetch
-    await supabase.rpc("set_config", {
-      key: "statement_timeout",
-      value: "15000"
-    });
-    
-    // Step 2: Pull cached signals for the remaining data
-    const { data: cachedData, error: cachedError } = await supabase
-      .from("latest_signals_with_bucket_cache")
-      .select("*");
-    
-    if (cachedError) {
-      console.error("❌ Cached fetch error:", cachedError);
-    }
-
-    // Combine and dedupe based on unique UID
-    const mergedMap = new Map();
-    // ✅ Cache second — it contains stopLoss and entryPrice
-    [...(realtimeData || []), ...(cachedData || [])].forEach(t => {
-      const uid = `${t.trade_id}_${t.timestamp}`;
-      mergedMap.set(uid, t); // cachedData wins
-    });
-
-    const finalSignals = Array.from(mergedMap.values())
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, 250);
-
-    console.log(`📥 Realtime signals: ${realtimeData?.length || 0}`);
-    console.log(`📦 Cached signals: ${cachedData?.length || 0}`);
-    console.log(`📊 Final signals returned: ${finalSignals.length}`);
-  
-    res.json(finalSignals);
+    console.log(`📥 Realtime signals returned: ${signals.length}`);
+    res.json(signals);
   } catch (e) {
     console.error("🔥 Unexpected error in latest-signals:", e);
     res.status(500).json({ error: "Unexpected error", message: e.message });
