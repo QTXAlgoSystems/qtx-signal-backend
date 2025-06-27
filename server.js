@@ -34,7 +34,7 @@ async function sendTelegramAlertsForSignal(signal) {
 
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
-    .select("user_id, telegram_chat_id, user_alerts(telegram)")
+    .select("user_id, telegram_chat_id")
     .eq("verified", true);
 
   if (linkError) {
@@ -43,25 +43,26 @@ async function sendTelegramAlertsForSignal(signal) {
   }
 
   for (const user of telegramUsers) {
-    // ❌ Skip if Telegram alerts are not enabled in alert prefs
-    if (!user.user_alerts?.telegram) {
-      continue;
-    }
-
-    // 🔍 Fetch alert preferences (symbols, tiers, timeframes)
+    // 🔍 Fetch alert prefs (includes the telegram toggle now)
     const { data: alertPrefs, error: prefsError } = await supabase
       .from("user_alerts")
-      .select("symbols, timeframes, tiers")
+      .select("symbols, timeframes, tiers, telegram")
       .eq("user_id", user.user_id)
       .single();
 
-    if (prefsError) {
+    if (prefsError || !alertPrefs) {
       console.warn(`⚠️ No alert prefs for user ${user.user_id}`);
       continue;
     }
 
-    // 🔍 Fetch verified setup for this signal
-    const { data: verifiedMatches, error: verifiedError } = await supabase
+    // ❌ Skip if Telegram toggle is off
+    if (!alertPrefs.telegram) {
+      console.log(`⏭️ Telegram disabled for user ${user.user_id}`);
+      continue;
+    }
+
+    // 🔍 Fetch verified setup (for filtering + formatting)
+    const { data: verifiedMatches } = await supabase
       .from("verified_setups")
       .select("*")
       .eq("symbol", signal.symbol)
@@ -82,14 +83,13 @@ async function sendTelegramAlertsForSignal(signal) {
 
     const verified = verifiedMatches[0];
 
-    // ⚙️ Filter based on user preferences
+    // ⚙️ Match signal to user prefs
     if (!doesMatchAlertPreferences(signal, alertPrefs, verified)) continue;
 
     try {
       const message = formatSignal(signal, verified);
       await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" });
 
-      // ✅ Log that this user got the alert
       await supabase.from("sent_telegram_alerts").insert({
         uid: signal.uid,
         user_id: user.user_id
