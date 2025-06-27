@@ -1,6 +1,11 @@
+const express = require("express");
+const app = express();
+app.use(express.json()); // ⬅️ This line is required before routes
+
 const TelegramBot = require("node-telegram-bot-api");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
+bot.setWebHook(`${process.env.BASE_URL}/bot${TELEGRAM_BOT_TOKEN}`);
 
 const express = require("express");
 const app = express();
@@ -561,8 +566,10 @@ app.post("/api/generate-telegram-code", async (req, res) => {
   return res.status(200).json({ code });
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+// 🔗 Telegram webhook route (must be before bot.onText)
+app.post(`/bot${TELEGRAM_BOT_TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body);  // Pass Telegram updates to the bot
+  res.sendStatus(200);          // Always respond quickly
 });
 
 bot.onText(/\/start (.+)/, async (msg, match) => {
@@ -599,4 +606,8 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
     console.error("Unexpected error:", err);
     bot.sendMessage(chatId, "An unexpected error occurred. Please try again.");
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
 });
