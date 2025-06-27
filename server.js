@@ -564,3 +564,44 @@ app.post("/api/generate-telegram-code", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
+
+const TelegramBot = require("node-telegram-bot-api");
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+
+bot.onText(/\/start (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const code = match[1].trim();
+
+  try {
+    // Look up user_id using the provided code
+    const { data, error } = await supabase
+      .from("telegram_codes")
+      .select("user_id")
+      .eq("code", code)
+      .single();
+
+    if (error || !data) {
+      console.error("Invalid or expired code:", error || "No match");
+      return bot.sendMessage(chatId, "Invalid or expired code. Please try again.");
+    }
+
+    const userId = data.user_id;
+
+    // Insert chat_id + user_id into telegram_users table
+    const { error: insertError } = await supabase
+      .from("telegram_users")
+      .upsert({ user_id: userId, chat_id: chatId });
+
+    if (insertError) {
+      console.error("Error saving Telegram chat_id:", insertError);
+      return bot.sendMessage(chatId, "Something went wrong linking your account.");
+    }
+
+    bot.sendMessage(chatId, "✅ Your account is now linked. You will receive GOD Complex alerts based on your dashboard settings.");
+  } catch (err) {
+    console.error("Unexpected error:", err);
+    bot.sendMessage(chatId, "An unexpected error occurred. Please try again.");
+  }
+});
