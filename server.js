@@ -730,6 +730,13 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
   }
 });
 
+// ✅ Endpoint to receive and process new trade signal
+app.post("/api/send-signal", async (req, res) => {
+  console.log("📬 /api/send-signal hit with:", req.body); // Optional debug log
+  await sendTelegramAlertsForSignal(req.body);
+  res.sendStatus(200);
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
