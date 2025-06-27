@@ -543,7 +543,10 @@ app.get("/api/latest-signals", async (req, res) => {
 
 app.post("/api/generate-telegram-code", async (req, res) => {
   const { user_id } = req.body;
-  if (!user_id) return res.status(400).json({ error: "Missing user_id" });
+
+  if (!user_id) {
+    return res.status(400).json({ error: "Missing user_id" });
+  }
 
   const code = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -554,10 +557,10 @@ app.post("/api/generate-telegram-code", async (req, res) => {
       telegram_chat_id: 0,
       verified: false,
       link_code: code
-    });
+    }, { onConflict: ['user_id'] }); // ✅ ensures update not insert if row exists
 
   if (error) {
-    console.error("Error inserting telegram link:", error);
+    console.error("❌ Error inserting telegram link:", error);
     return res.status(500).json({ error: error.message });
   }
 
@@ -565,51 +568,58 @@ app.post("/api/generate-telegram-code", async (req, res) => {
 });
 
 // 🔗 Telegram webhook route (must be before bot.onText)
+// ✅ Webhook route — required for Telegram to forward updates
 app.post(`/bot${TELEGRAM_BOT_TOKEN}`, (req, res) => {
-  bot.processUpdate(req.body);  // Pass Telegram updates to the bot
-  res.sendStatus(200);          // Always respond quickly
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
 });
 
+// ✅ Handle /start CODE command
 bot.onText(/\/start (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const code = match[1].trim();
 
   try {
-    // Look up user_id using the provided code
     const { data, error } = await supabase
-      .from("telegram_links")          // ✅ correct table
+      .from("telegram_links")
       .select("user_id")
-      .eq("link_code", code)           // ✅ correct field
+      .eq("link_code", code)
       .single();
-    
+
     if (error || !data) {
-      console.error("Invalid or expired code:", error || "No match");
+      console.error("❌ Invalid or expired code:", error || "No match");
       return bot.sendMessage(chatId, "Invalid or expired code. Please try again.");
     }
 
     const userId = data.user_id;
-    
-    console.log("Linking Telegram account:", {
+
+    console.log("🔗 Linking Telegram account:", {
       user_id: userId,
       chat_id: chatId
     });
-    
-    const { error: insertError } = await supabase
+
+    const { error: insertError, data: updateData } = await supabase
       .from("telegram_links")
       .update({
         telegram_chat_id: chatId,
         verified: true
       })
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .select();
 
     if (insertError) {
-      console.error("Error saving Telegram chat_id:", insertError);
+      console.error("❌ Error saving Telegram chat_id:", insertError);
       return bot.sendMessage(chatId, "Something went wrong linking your account.");
+    }
+
+    if (!updateData || updateData.length === 0) {
+      console.error("⚠️ No matching row found for user_id:", userId);
+      return bot.sendMessage(chatId, "Could not find your account to link.");
     }
 
     bot.sendMessage(chatId, "✅ Your account is now linked. You will receive GOD Complex alerts based on your dashboard settings.");
   } catch (err) {
-    console.error("Unexpected error:", err);
+    console.error("❌ Unexpected error:", err);
     bot.sendMessage(chatId, "An unexpected error occurred. Please try again.");
   }
 });
