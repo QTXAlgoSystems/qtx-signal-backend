@@ -34,7 +34,7 @@ async function sendTelegramAlertsForSignal(signal) {
 
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
-    .select("user_id, telegram_chat_id")
+    .select("user_id, telegram_chat_id, user_alerts(telegram)")
     .eq("verified", true);
 
   if (linkError) {
@@ -43,6 +43,12 @@ async function sendTelegramAlertsForSignal(signal) {
   }
 
   for (const user of telegramUsers) {
+    // ❌ Skip if Telegram alerts are not enabled in alert prefs
+    if (!user.user_alerts?.telegram) {
+      continue;
+    }
+
+    // 🔍 Fetch alert preferences (symbols, tiers, timeframes)
     const { data: alertPrefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("symbols, timeframes, tiers")
@@ -54,7 +60,7 @@ async function sendTelegramAlertsForSignal(signal) {
       continue;
     }
 
-    // 🔍 Fetch verified setup (for filtering + formatting)
+    // 🔍 Fetch verified setup for this signal
     const { data: verifiedMatches, error: verifiedError } = await supabase
       .from("verified_setups")
       .select("*")
@@ -76,12 +82,13 @@ async function sendTelegramAlertsForSignal(signal) {
 
     const verified = verifiedMatches[0];
 
+    // ⚙️ Filter based on user preferences
     if (!doesMatchAlertPreferences(signal, alertPrefs, verified)) continue;
 
     try {
       const message = formatSignal(signal, verified);
       await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" });
-    
+
       // ✅ Log that this user got the alert
       await supabase.from("sent_telegram_alerts").insert({
         uid: signal.uid,
