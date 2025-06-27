@@ -29,6 +29,35 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ── Check Telegram Status Route ──
+app.get("/api/check-telegram-status", async (req, res) => {
+  const user_id = req.query.user_id;
+  if (!user_id) {
+    return res.status(400).json({ error: "Missing user_id" });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("user_alerts")
+      .select("chat_id")
+      .eq("user_id", user_id)
+      .single();
+
+    if (error || !data) {
+      return res.status(200).json({ linked: false, chat_id: null });
+    }
+
+    res.json({
+      linked: !!data.chat_id,
+      chat_id: data.chat_id,
+    });
+  } catch (err) {
+    console.error("❌ Failed to check Telegram status:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal:", signal); 
 
