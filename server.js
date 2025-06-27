@@ -81,6 +81,12 @@ async function sendTelegramAlertsForSignal(signal) {
     try {
       const message = formatSignal(signal, verified);
       await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" });
+    
+      // ✅ Log that this user got the alert
+      await supabase.from("sent_telegram_alerts").insert({
+        uid: signal.uid,
+        user_id: user.user_id
+      });
     } catch (err) {
       console.error(`🚫 Failed to send Telegram alert to ${user.telegram_chat_id}:`, err);
     }
