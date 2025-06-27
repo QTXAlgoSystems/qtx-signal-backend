@@ -56,11 +56,36 @@ async function sendTelegramAlertsForSignal(signal) {
     if (!doesMatchAlertPreferences(signal, alertPrefs)) continue;
 
     try {
-      const message = formatSignal(signal);
+      const message = formatSignal(signal, verified);
       await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "HTML" });
     } catch (err) {
       console.error(`🚫 Failed to send Telegram alert to ${user.telegram_chat_id}:`, err);
     }
+    // 🔍 Fetch matching verified_setup (including notes)
+    const { data: verifiedMatches, error: verifiedError } = await supabase
+      .from("verified_setups")
+      .select("*")
+      .eq("symbol", signal.symbol)
+      .eq("timeframe", signal.timeframe)
+      .eq("setup", signal.setup)
+      .eq("notes", signal.notes)  // ✅ use exact notes match
+      .limit(1);
+    
+    if (!verifiedMatches?.length) {
+      console.warn("⚠️ No matching verified_setup for:", {
+        symbol: signal.symbol,
+        tf: signal.timeframe,
+        setup: signal.setup,
+        notes: signal.notes
+      });
+      continue; // Skip this user if no verified match
+    }
+    
+    const verified = verifiedMatches[0]; // ✅
+
+    const message = formatSignal(signal, verified);
+    await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" }); // or "HTML" if needed
+
   }
 }
 
@@ -74,38 +99,39 @@ function doesMatchAlertPreferences(signal, prefs) {
     !timeframes || timeframes.length === 0 || timeframes.includes(signal.timeframe);
 
   const matchesTier =
-    !tiers || tiers.length === 0 || tiers.includes(signal.tier);
+    !tiers || tiers.length === 0 || tiers.includes(verified?.tier);
 
   return matchesSymbol && matchesTimeframe && matchesTier;
 }
 
-function formatSignal(signal) {
-  const {
-    symbol,
-    timeframe,
-    setup,
-    direction,
-    entryPrice,
-    slPrice,
-    tp1Price,
-    tp2Price,
-    score,
-    biashtf1,
-    biashtf2,
-    biashtf3,
-    tier
-  } = signal;
+function formatSignal(signal, verified) {
+  const tfLabel = `${signal.timeframe}m`;
+  const tier = verified?.tier || "—";
+  const winRate = verified?.win_rate ? `${verified.win_rate.toFixed(0)}%` : "—";
+  const trades = verified?.total_trades || "—";
+  const pf = verified?.profit_factor?.toFixed(2) || "—";
+  const pnl = verified?.avg_pnl?.toFixed(1) || "—";
+  const notes = verified?.notes || "—";
 
-  return (
-    `📡 <b>New GOD Complex Signal</b>\n` +
-    `🧠 <b>Setup:</b> ${setup} (${direction})\n` +
-    `📈 <b>Symbol:</b> ${symbol} | <b>TF:</b> ${timeframe} | <b>Tier:</b> ${tier}\n` +
-    `🎯 <b>Entry:</b> ${entryPrice} | <b>TP1:</b> ${tp1Price} | <b>TP2:</b> ${tp2Price}\n` +
-    `🛡️ <b>SL:</b> ${slPrice}\n` +
-    `🔢 <b>Score:</b> ${score}\n` +
-    `📊 <b>Bias HTF:</b> ${biashtf1}, ${biashtf2}, ${biashtf3}`
-  );
+  return `
+🚨 *New GOD Complex Setup Alert*
+
+📈 Symbol: *${signal.symbol}*
+🕐 Timeframe: *${tfLabel}*
+📊 Setup: *${signal.setup}*
+
+📌 Tier: *${tier}*
+📌 Win Rate: *${winRate}* 
+Trades: ${trades} trades
+📌 Profit Factor: *${pf}*
+📌 Avg PnL: *${pnl}R*
+
+📎 Notes: ${notes}
+
+👉 Check the dashboard to view the full setup.
+`.trim();
 }
+
 
 // Build a unique key: use non‐empty id, else symbol_timestamp
 function getKey(payload) {
