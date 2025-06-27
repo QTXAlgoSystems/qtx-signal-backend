@@ -1,3 +1,7 @@
+const TelegramBot = require("node-telegram-bot-api");
+const TELEGRAM_TOKEN = "7560403793:AAHUJ6W0iKD7CmSf8om2inoTl0xaq_NOz6c";
+const telegramBot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+
 const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
