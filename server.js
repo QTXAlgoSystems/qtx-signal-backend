@@ -572,11 +572,11 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
   try {
     // Look up user_id using the provided code
     const { data, error } = await supabase
-      .from("telegram_codes")
+      .from("telegram_links")          // ✅ correct table
       .select("user_id")
-      .eq("code", code)
+      .eq("link_code", code)           // ✅ correct field
       .single();
-
+    
     if (error || !data) {
       console.error("Invalid or expired code:", error || "No match");
       return bot.sendMessage(chatId, "Invalid or expired code. Please try again.");
