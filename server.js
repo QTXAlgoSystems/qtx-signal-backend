@@ -7,8 +7,6 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
 bot.setWebHook(`${process.env.BASE_URL}/bot${TELEGRAM_BOT_TOKEN}`);
 
-const express = require("express");
-const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN;
 
