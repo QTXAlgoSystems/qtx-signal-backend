@@ -29,6 +29,84 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+async function sendTelegramAlertsForSignal(signal) {
+  console.log("📦 Incoming signal:", signal); 
+  const { data: telegramUsers, error: linkError } = await supabase
+    .from("telegram_links")
+    .select("user_id, telegram_chat_id")
+    .eq("verified", true);
+
+  if (linkError) {
+    console.error("❌ Failed to fetch telegram_links:", linkError);
+    return;
+  }
+
+  for (const user of telegramUsers) {
+    const { data: alertPrefs, error: prefsError } = await supabase
+      .from("user_alerts")
+      .select("symbols, timeframes, tiers")
+      .eq("user_id", user.user_id)
+      .single();
+
+    if (prefsError) {
+      console.warn(`⚠️ No alert prefs for user ${user.user_id}`);
+      continue;
+    }
+
+    if (!doesMatchAlertPreferences(signal, alertPrefs)) continue;
+
+    try {
+      const message = formatSignal(signal);
+      await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error(`🚫 Failed to send Telegram alert to ${user.telegram_chat_id}:`, err);
+    }
+  }
+}
+
+function doesMatchAlertPreferences(signal, prefs) {
+  const { symbols, timeframes, tiers } = prefs;
+
+  const matchesSymbol =
+    !symbols || symbols.length === 0 || symbols.includes(signal.symbol);
+
+  const matchesTimeframe =
+    !timeframes || timeframes.length === 0 || timeframes.includes(signal.timeframe);
+
+  const matchesTier =
+    !tiers || tiers.length === 0 || tiers.includes(signal.tier);
+
+  return matchesSymbol && matchesTimeframe && matchesTier;
+}
+
+function formatSignal(signal) {
+  const {
+    symbol,
+    timeframe,
+    setup,
+    direction,
+    entryPrice,
+    slPrice,
+    tp1Price,
+    tp2Price,
+    score,
+    biashtf1,
+    biashtf2,
+    biashtf3,
+    tier
+  } = signal;
+
+  return (
+    `📡 <b>New GOD Complex Signal</b>\n` +
+    `🧠 <b>Setup:</b> ${setup} (${direction})\n` +
+    `📈 <b>Symbol:</b> ${symbol} | <b>TF:</b> ${timeframe} | <b>Tier:</b> ${tier}\n` +
+    `🎯 <b>Entry:</b> ${entryPrice} | <b>TP1:</b> ${tp1Price} | <b>TP2:</b> ${tp2Price}\n` +
+    `🛡️ <b>SL:</b> ${slPrice}\n` +
+    `🔢 <b>Score:</b> ${score}\n` +
+    `📊 <b>Bias HTF:</b> ${biashtf1}, ${biashtf2}, ${biashtf3}`
+  );
+}
+
 // Build a unique key: use non‐empty id, else symbol_timestamp
 function getKey(payload) {
   const id = payload.id?.trim();
