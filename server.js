@@ -534,6 +534,29 @@ app.get("/api/latest-signals", async (req, res) => {
   }
 });
 
+app.post("/api/generate-telegram-code", async (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: "Missing user_id" });
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+  const { error } = await supabase
+    .from("telegram_links")
+    .upsert({
+      user_id,
+      telegram_chat_id: 0,
+      verified: false,
+      link_code: code
+    });
+
+  if (error) {
+    console.error("Error inserting telegram link:", error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  return res.status(200).json({ code });
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
