@@ -591,11 +591,15 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
 
     const userId = data.user_id;
 
-    // Insert chat_id + user_id into telegram_users table
+    console.log("Trying to save Telegram chat_id:", {
+      user_id: userId,
+      chat_id: chatId
+    });
+    
     const { error: insertError } = await supabase
       .from("telegram_users")
       .upsert({ user_id: userId, chat_id: chatId });
-
+    
     if (insertError) {
       console.error("Error saving Telegram chat_id:", insertError);
       return bot.sendMessage(chatId, "Something went wrong linking your account.");
