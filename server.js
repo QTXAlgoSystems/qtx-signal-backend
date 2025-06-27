@@ -31,6 +31,7 @@ const supabase = createClient(
 
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal:", signal); 
+
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
     .select("user_id, telegram_chat_id")
@@ -53,24 +54,16 @@ async function sendTelegramAlertsForSignal(signal) {
       continue;
     }
 
-    if (!doesMatchAlertPreferences(signal, alertPrefs)) continue;
-
-    try {
-      const message = formatSignal(signal, verified);
-      await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "HTML" });
-    } catch (err) {
-      console.error(`🚫 Failed to send Telegram alert to ${user.telegram_chat_id}:`, err);
-    }
-    // 🔍 Fetch matching verified_setup (including notes)
+    // 🔍 Fetch verified setup (for filtering + formatting)
     const { data: verifiedMatches, error: verifiedError } = await supabase
       .from("verified_setups")
       .select("*")
       .eq("symbol", signal.symbol)
       .eq("timeframe", signal.timeframe)
       .eq("setup", signal.setup)
-      .eq("notes", signal.notes)  // ✅ use exact notes match
+      .eq("notes", signal.notes)
       .limit(1);
-    
+
     if (!verifiedMatches?.length) {
       console.warn("⚠️ No matching verified_setup for:", {
         symbol: signal.symbol,
@@ -78,18 +71,23 @@ async function sendTelegramAlertsForSignal(signal) {
         setup: signal.setup,
         notes: signal.notes
       });
-      continue; // Skip this user if no verified match
+      continue;
     }
-    
-    const verified = verifiedMatches[0]; // ✅
 
-    const message = formatSignal(signal, verified);
-    await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" }); // or "HTML" if needed
+    const verified = verifiedMatches[0];
 
+    if (!doesMatchAlertPreferences(signal, alertPrefs, verified)) continue;
+
+    try {
+      const message = formatSignal(signal, verified);
+      await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" });
+    } catch (err) {
+      console.error(`🚫 Failed to send Telegram alert to ${user.telegram_chat_id}:`, err);
+    }
   }
 }
 
-function doesMatchAlertPreferences(signal, prefs) {
+function doesMatchAlertPreferences(signal, prefs, verified) {
   const { symbols, timeframes, tiers } = prefs;
 
   const matchesSymbol =
@@ -112,6 +110,8 @@ function formatSignal(signal, verified) {
   const pf = verified?.profit_factor?.toFixed(2) || "—";
   const pnl = verified?.avg_pnl?.toFixed(1) || "—";
   const notes = verified?.notes || "—";
+  const entry = signal.entry_price ?? "—";
+  const sl = signal.sl_price ?? "—";
 
   return `
 🚨 *New GOD Complex Setup Alert*
@@ -119,6 +119,9 @@ function formatSignal(signal, verified) {
 📈 Symbol: *${signal.symbol}*
 🕐 Timeframe: *${tfLabel}*
 📊 Setup: *${signal.setup}*
+
+🎯 Entry Price: *${entry}*
+🛡️ Stop Loss: *${sl}*
 
 📌 Tier: *${tier}*
 📌 Win Rate: *${winRate}* 
@@ -131,7 +134,6 @@ Trades: ${trades} trades
 👉 Check the dashboard to view the full setup.
 `.trim();
 }
-
 
 // Build a unique key: use non‐empty id, else symbol_timestamp
 function getKey(payload) {
