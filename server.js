@@ -715,54 +715,65 @@ app.post("/api/send-signal", async (req, res) => {
 
 app.post("/api/send-followup-alert", async (req, res) => {
   const { uid, symbol, timeframe, setup, type, pnl, time } = req.body;
-
   console.log("📣 Follow-up alert received:", req.body);
 
   try {
-    // Find users who received the original signal
-    const { data: recipients, error } = await supabase
+    // 1) Find users who received the original signal
+    const { data: recipients, error: recError } = await supabase
       .from("sent_telegram_alerts")
       .select("user_id")
       .eq("uid", uid);
 
-    if (error) {
-      console.error("❌ Error fetching recipients:", error);
+    if (recError) {
+      console.error("❌ Error fetching recipients:", recError);
       return res.status(500).json({ error: "DB error" });
     }
-
-    if (!recipients?.length) {
-      console.log("⚠️ No users found who received this signal:", uid);
+    if (!recipients.length) {
+      console.log("⚠️ No users found for this signal:", uid);
       return res.status(200).json({ message: "No recipients" });
     }
 
-    // Format time in EST
+    // 2) Prepare the follow-up message
     const formattedTime = time
       ? new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown time";
-
     const message = `🔁 *${type} Update* for *${symbol}* ${timeframe}min ${setup}
 🕒 Time: ${formattedTime}
 📈 PnL: ${pnl?.toFixed(2)}%`;
 
-    // Get chat IDs from your `telegram_links` table
-    const userIds = recipients.map(r => r.user_id);
+    // 3) Loop & dedupe per (uid, user_id, type)
+    for (const { user_id } of recipients) {
+      // Attempt to record this follow-up; skip if already sent
+      const { error: dupError } = await supabase
+        .from("sent_telegram_alerts")
+        .insert({ uid, user_id, alert_type: type });
 
-    const { data: chatLinks, error: linkError } = await supabase
-      .from("telegram_links")
-      .select("user_id, telegram_chat_id")
-      .in("user_id", userIds)
-      .eq("verified", true);
+      if (dupError) {
+        // Duplicate (already sent this type for this uid)
+        continue;
+      }
 
-    if (linkError) {
-      console.error("❌ Error fetching telegram_links:", linkError);
-      return res.status(500).json({ error: "DB error" });
-    }
+      // 4) Fetch their chat ID
+      const { data: link, error: linkError } = await supabase
+        .from("telegram_links")
+        .select("telegram_chat_id")
+        .eq("user_id", user_id)
+        .eq("verified", true)
+        .single();
 
-    for (const link of chatLinks) {
+      if (linkError || !link) {
+        console.error("❌ Could not fetch Telegram link for user", user_id, linkError);
+        continue;
+      }
+
+      // 5) Send the follow-up alert
       try {
-        await bot.sendMessage(link.telegram_chat_id, message, { parse_mode: "Markdown" });
+        await bot.sendMessage(link.telegram_chat_id, message, {
+          parse_mode: "Markdown",
+        });
+        console.log(`🔔 Follow-up ${type} sent to`, link.telegram_chat_id);
       } catch (err) {
-        console.error(`🚫 Failed to send follow-up alert to ${link.telegram_chat_id}:`, err);
+        console.error(`🚫 Failed to send follow-up ${type} to ${link.telegram_chat_id}:`, err);
       }
     }
 
