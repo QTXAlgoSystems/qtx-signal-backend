@@ -63,7 +63,7 @@ app.get("/api/check-telegram-status", async (req, res) => {
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal:", signal);
 
-  // Step 1: fetch all linked Telegram users
+  // 1) Grab all users who’ve linked Telegram
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
     .select("user_id, telegram_chat_id")
@@ -73,145 +73,43 @@ async function sendTelegramAlertsForSignal(signal) {
     console.error("❌ Failed to fetch telegram_links:", linkError);
     return;
   }
-  console.log(`👥 Found ${telegramUsers.length} linked Telegram users`);
 
-  // Step 2: loop through each user
-  for (const user of telegramUsers) {
-    console.log("🔍 Fetching prefs for user:", user.user_id);
-
-    const { data: alertPrefs, error: prefsError } = await supabase
+  // 2) For each user, check their prefs and send
+  for (const { user_id, telegram_chat_id } of telegramUsers) {
+    const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("symbols, timeframes, tiers, telegram")
-      .eq("user_id", user.user_id)
+      .eq("user_id", user_id)
       .single();
 
-    if (prefsError || !alertPrefs) {
-      console.warn(`⚠️ No alert prefs for user ${user.user_id}`, prefsError);
-      continue;
-    }
-    console.log(`   → telegram toggle is`, alertPrefs.telegram);
+    if (prefsError || !prefs) continue;
+    if (!prefs.telegram) continue;  // skip if they disabled Telegram
 
-    // Step 3: skip if they’ve disabled Telegram alerts
-    if (!alertPrefs.telegram) {
-      console.log(`   ⏭️ Skipping ${user.user_id} because telegram is off`);
-      continue;
-    }
-
-    // Step 4: fetch the matching verified setup
-    const { data: verifiedMatches } = await supabase
-      .from("verified_setups")
-      .select("*")
-      .eq("symbol", signal.symbol)
-      .eq("timeframe", signal.timeframe)
-      .eq("setup", signal.setup)
-      .eq("notes", signal.notes)
-      .limit(1);
-
-    if (!verifiedMatches?.length) {
-      console.warn("⚠️ No matching verified_setup for:", {
-        symbol: signal.symbol,
-        tf: signal.timeframe,
-        setup: signal.setup,
-        notes: signal.notes,
-      });
+    // 3) Apply the same symbol/tf/tier filters
+    const { symbols, timeframes, tiers } = prefs;
+    if (
+      (symbols?.length && !symbols.includes(signal.symbol)) ||
+      (timeframes?.length && !timeframes.includes(signal.timeframe)) ||
+      (tiers?.length && !tiers.includes(signal.tier))
+    ) {
       continue;
     }
 
-    const verified = verifiedMatches[0];
-
-    // Step 5: check user’s symbol/tf/tier prefs
-    if (!doesMatchAlertPreferences(signal, alertPrefs, verified)) {
-      console.log(`   ⏭️ Signal doesn’t match preferences for ${user.user_id}`);
-      continue;
-    }
-
-    // Step 6: send the message and record it
+    // 4) Dispatch the exact title/body from the front end
     try {
-      const message = formatSignal(signal, verified);
-      console.log(`   ✅ Sending Telegram to ${user.telegram_chat_id}:\n`, message);
+      const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
+      await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
+      console.log(`🔔 Sent Telegram to ${telegram_chat_id}`);
 
-      await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" });
-      console.log(`   🔔 bot.sendMessage succeeded for ${user.telegram_chat_id}`);
-
+      // 5) Record to prevent duplicates
       await supabase.from("sent_telegram_alerts").insert({
         uid: signal.uid,
-        user_id: user.user_id,
+        user_id
       });
-      console.log(`   🗄️ Recorded in sent_telegram_alerts for ${user.user_id}`);
     } catch (err) {
-      console.error(
-        `🚫 bot.sendMessage FAILED for ${user.telegram_chat_id}:`,
-        err
-      );
+      console.error(`🚫 Failed to send Telegram to ${telegram_chat_id}:`, err);
     }
   }
-}
-
-function doesMatchAlertPreferences(signal, prefs, verified) {
-  const { symbols, timeframes, tiers } = prefs;
-
-  const matchesSymbol =
-    !symbols || symbols.length === 0 || symbols.includes(signal.symbol);
-
-  const matchesTimeframe =
-    !timeframes || timeframes.length === 0 || timeframes.includes(signal.timeframe);
-
-  const matchesTier =
-    !tiers || tiers.length === 0 || tiers.includes(verified?.tier);
-
-  return matchesSymbol && matchesTimeframe && matchesTier;
-}
-
-function formatSignal(signal, verified) {
-  // Determine the tier to show, preferring the verified match
-  const rawTier = (verified?.tier || signal.tier || "—").toLowerCase();
-  const tierMap = {
-    god:   "GOD 🔱",
-    elite: "Elite 💎",
-    great: "Great ⚡",
-    good:  "Good ✅"
-  };
-  const tierLabel = tierMap[rawTier] || "—";
-
-  // Entry & SL
-  const entryPrice = signal.entry_price  != null ? signal.entry_price : "—";
-  const stopLoss   = signal.sl_price     != null ? signal.sl_price    : "—";
-
-  // Stats formatting
-  const winRate = verified?.win_rate != null
-    ? `${(verified.win_rate * 100).toFixed(1)}%`
-    : "—";
-  const trades = verified?.total_trades ?? "—";
-  const profitFactor = verified?.profit_factor != null
-    ? verified.profit_factor.toFixed(2)
-    : "—";
-  const avgPnl = verified?.avg_pnl != null
-    ? `${verified.avg_pnl.toFixed(2)}%`
-    : "—";
-
-  const notesText = verified?.notes || "—";
-  const tfLabel = `${signal.timeframe}m`;
-
-  return `
-${tierLabel} Signal Alert
-
-📈 Symbol: *${signal.symbol}*
-🕐 Timeframe: *${tfLabel}*
-📊 Setup: *${signal.setup}*
-
-🎯 Entry Price: *${entryPrice}*
-🛡️ Stop Loss: *${stopLoss}*
-
-📌 Tier: *${tierLabel}*
-📌 Win Rate: *${winRate}*
-📌 Trades: ${trades}
-📌 Profit Factor: *${profitFactor}*
-📌 Avg PnL: *${avgPnl}*
-
-📎 Notes: ${notesText}
-
-👉 Check the dashboard to view the full setup.
-  `.trim();
 }
 
 // Build a unique key: use non‐empty id, else symbol_timestamp
