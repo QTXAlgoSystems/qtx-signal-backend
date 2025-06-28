@@ -37,26 +37,28 @@ app.get("/api/check-telegram-status", async (req, res) => {
   }
 
   try {
+    // Query telegram_links instead of user_alerts
     const { data, error } = await supabase
-      .from("user_alerts")
-      .select("chat_id")
+      .from("telegram_links")
+      .select("telegram_chat_id, verified")
       .eq("user_id", user_id)
       .single();
 
-    if (error || !data) {
+    // If no row or not verified, treat as unlinked
+    if (error || !data || !data.verified) {
       return res.status(200).json({ linked: false, chat_id: null });
     }
 
+    // Otherwise return true and the chat ID
     res.json({
-      linked: !!data.chat_id,
-      chat_id: data.chat_id,
+      linked: true,
+      chat_id: data.telegram_chat_id,
     });
   } catch (err) {
     console.error("❌ Failed to check Telegram status:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal:", signal); 
