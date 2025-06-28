@@ -61,8 +61,7 @@ app.get("/api/check-telegram-status", async (req, res) => {
 });
 
 async function sendTelegramAlertsForSignal(signal) {
-  console.log("📦 Incoming signal:", signal);
-  console.log("🛠️ Entered sendTelegramAlertsForSignal for UID:", signal.uid);
+  console.log("📦 Incoming signal for Telegram:", signal.uid);
 
   // 1) Grab all users who’ve linked Telegram
   const { data: telegramUsers, error: linkError } = await supabase
@@ -70,47 +69,37 @@ async function sendTelegramAlertsForSignal(signal) {
     .select("user_id, telegram_chat_id")
     .eq("verified", true);
 
-  console.log("👥 Raw telegramUsers:", telegramUsers, "linkError:", linkError);
-
   if (linkError) {
     console.error("❌ Failed to fetch telegram_links:", linkError);
     return;
   }
 
-  // 2) For each user, check their prefs and send
+  // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
+    // 2a) Check they’ve enabled Telegram in prefs
     const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
-      .select("symbols, timeframes, tiers, telegram")
+      .select("telegram")
       .eq("user_id", user_id)
       .single();
 
-    if (prefsError || !prefs) continue;
-    if (!prefs.telegram) continue;  // skip if they disabled Telegram
-
-    // 3) Apply the same symbol/tf/tier filters
-    const { symbols, timeframes, tiers } = prefs;
-    if (
-      (symbols?.length && !symbols.includes(signal.symbol)) ||
-      (timeframes?.length && !timeframes.includes(signal.timeframe)) ||
-      (tiers?.length && !tiers.includes(signal.tier))
-    ) {
-      continue;
+    if (prefsError || !prefs || !prefs.telegram) {
+      continue;  // skip if disabled or error
     }
 
-    // 4) Dispatch the exact title/body from the front end
+    // 3) Send the pre-built message from the front end
     try {
       const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
       console.log(`🔔 Sent Telegram to ${telegram_chat_id}`);
 
-      // 5) Record to prevent duplicates
+      // 4) Record it to prevent re-sends
       await supabase.from("sent_telegram_alerts").insert({
-        uid: signal.uid,
+        uid:     signal.uid,
         user_id
       });
     } catch (err) {
-      console.error(`🚫 Failed to send Telegram to ${telegram_chat_id}:`, err);
+      console.error(`🚫 sendTelegramAlertsForSignal error for ${telegram_chat_id}:`, err);
     }
   }
 }
