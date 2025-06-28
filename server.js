@@ -62,12 +62,15 @@ app.get("/api/check-telegram-status", async (req, res) => {
 
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal:", signal);
+  console.log("🛠️ Entered sendTelegramAlertsForSignal for UID:", signal.uid);
 
   // 1) Grab all users who’ve linked Telegram
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
     .select("user_id, telegram_chat_id")
     .eq("verified", true);
+
+  console.log("👥 Raw telegramUsers:", telegramUsers, "linkError:", linkError);
 
   if (linkError) {
     console.error("❌ Failed to fetch telegram_links:", linkError);
