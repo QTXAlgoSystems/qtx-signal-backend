@@ -857,19 +857,6 @@ app.post("/api/send-followup-alert", async (req, res) => {
   }
 });
 
-// ⚡️ Force-send a test Telegram message
-app.post("/api/force-telegram", async (req, res) => {
-  const testChatId = 445185177;  // your chat_id
-  try {
-    const result = await bot.sendMessage(testChatId, "🔥 Test Telegram Ping 🔥");
-    console.log("✅ Force-send result:", result);
-    return res.json({ ok: true, result });
-  } catch (err) {
-    console.error("❌ Force-send failed:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
