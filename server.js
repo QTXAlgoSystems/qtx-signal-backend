@@ -61,8 +61,9 @@ app.get("/api/check-telegram-status", async (req, res) => {
 });
 
 async function sendTelegramAlertsForSignal(signal) {
-  console.log("📦 Incoming signal:", signal); 
+  console.log("📦 Incoming signal:", signal);
 
+  // Step 1: fetch all linked Telegram users
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
     .select("user_id, telegram_chat_id")
@@ -72,9 +73,12 @@ async function sendTelegramAlertsForSignal(signal) {
     console.error("❌ Failed to fetch telegram_links:", linkError);
     return;
   }
+  console.log(`👥 Found ${telegramUsers.length} linked Telegram users`);
 
+  // Step 2: loop through each user
   for (const user of telegramUsers) {
-    // 🔍 Fetch alert prefs (includes the telegram toggle now)
+    console.log("🔍 Fetching prefs for user:", user.user_id);
+
     const { data: alertPrefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("symbols, timeframes, tiers, telegram")
@@ -82,17 +86,18 @@ async function sendTelegramAlertsForSignal(signal) {
       .single();
 
     if (prefsError || !alertPrefs) {
-      console.warn(`⚠️ No alert prefs for user ${user.user_id}`);
+      console.warn(`⚠️ No alert prefs for user ${user.user_id}`, prefsError);
       continue;
     }
+    console.log(`   → telegram toggle is`, alertPrefs.telegram);
 
-    // ❌ Skip if Telegram toggle is off
+    // Step 3: skip if they’ve disabled Telegram alerts
     if (!alertPrefs.telegram) {
-      console.log(`⏭️ Telegram disabled for user ${user.user_id}`);
+      console.log(`   ⏭️ Skipping ${user.user_id} because telegram is off`);
       continue;
     }
 
-    // 🔍 Fetch verified setup (for filtering + formatting)
+    // Step 4: fetch the matching verified setup
     const { data: verifiedMatches } = await supabase
       .from("verified_setups")
       .select("*")
@@ -107,26 +112,37 @@ async function sendTelegramAlertsForSignal(signal) {
         symbol: signal.symbol,
         tf: signal.timeframe,
         setup: signal.setup,
-        notes: signal.notes
+        notes: signal.notes,
       });
       continue;
     }
 
     const verified = verifiedMatches[0];
 
-    // ⚙️ Match signal to user prefs
-    if (!doesMatchAlertPreferences(signal, alertPrefs, verified)) continue;
+    // Step 5: check user’s symbol/tf/tier prefs
+    if (!doesMatchAlertPreferences(signal, alertPrefs, verified)) {
+      console.log(`   ⏭️ Signal doesn’t match preferences for ${user.user_id}`);
+      continue;
+    }
 
+    // Step 6: send the message and record it
     try {
       const message = formatSignal(signal, verified);
+      console.log(`   ✅ Sending Telegram to ${user.telegram_chat_id}:\n`, message);
+
       await bot.sendMessage(user.telegram_chat_id, message, { parse_mode: "Markdown" });
+      console.log(`   🔔 bot.sendMessage succeeded for ${user.telegram_chat_id}`);
 
       await supabase.from("sent_telegram_alerts").insert({
         uid: signal.uid,
-        user_id: user.user_id
+        user_id: user.user_id,
       });
+      console.log(`   🗄️ Recorded in sent_telegram_alerts for ${user.user_id}`);
     } catch (err) {
-      console.error(`🚫 Failed to send Telegram alert to ${user.telegram_chat_id}:`, err);
+      console.error(
+        `🚫 bot.sendMessage FAILED for ${user.telegram_chat_id}:`,
+        err
+      );
     }
   }
 }
