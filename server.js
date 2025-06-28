@@ -76,30 +76,34 @@ async function sendTelegramAlertsForSignal(signal) {
 
   // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
-    // 2a) Check they’ve enabled Telegram in prefs
+    // 2a) Attempt to record the *initial* alert (alert_type = "")
+    const { error: dupError } = await supabase
+      .from("sent_telegram_alerts")
+      .insert({ uid: signal.uid, user_id, alert_type: "" });
+
+    if (dupError) {
+      // Duplicate insert → alert already sent to this user
+      continue;
+    }
+
+    // 2b) Check they still have Telegram enabled
     const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("telegram")
       .eq("user_id", user_id)
       .single();
 
-    if (prefsError || !prefs || !prefs.telegram) {
-      continue;  // skip if disabled or error
+    if (prefsError || !prefs?.telegram) {
+      continue;
     }
 
     // 3) Send the pre-built message from the front end
     try {
       const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
-      console.log(`🔔 Sent Telegram to ${telegram_chat_id}`);
-
-      // 4) Record it to prevent re-sends
-      await supabase.from("sent_telegram_alerts").insert({
-        uid:     signal.uid,
-        user_id
-      });
+      console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
     } catch (err) {
-      console.error(`🚫 sendTelegramAlertsForSignal error for ${telegram_chat_id}:`, err);
+      console.error(`🚫 Failed to send initial alert to ${telegram_chat_id}:`, err);
     }
   }
 }
@@ -743,17 +747,17 @@ app.post("/api/send-followup-alert", async (req, res) => {
 
     // 3) Loop & dedupe per (uid, user_id, type)
     for (const { user_id } of recipients) {
-      // Attempt to record this follow-up; skip if already sent
+      // 3a) Attempt to record this follow-up; skip if already sent
       const { error: dupError } = await supabase
         .from("sent_telegram_alerts")
         .insert({ uid, user_id, alert_type: type });
 
       if (dupError) {
-        // Duplicate (already sent this type for this uid)
+        // Already sent this update type for this user
         continue;
       }
 
-      // 4) Fetch their chat ID
+      // 3b) Fetch their verified chat ID
       const { data: link, error: linkError } = await supabase
         .from("telegram_links")
         .select("telegram_chat_id")
@@ -766,7 +770,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
         continue;
       }
 
-      // 5) Send the follow-up alert
+      // 3c) Send the follow-up alert
       try {
         await bot.sendMessage(link.telegram_chat_id, message, {
           parse_mode: "Markdown",
