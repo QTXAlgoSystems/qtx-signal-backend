@@ -163,36 +163,55 @@ function doesMatchAlertPreferences(signal, prefs, verified) {
 }
 
 function formatSignal(signal, verified) {
+  // Determine the tier to show, preferring the verified match
+  const rawTier = (verified?.tier || signal.tier || "—").toLowerCase();
+  const tierMap = {
+    god:   "GOD 🔱",
+    elite: "Elite 💎",
+    great: "Great ⚡",
+    good:  "Good ✅"
+  };
+  const tierLabel = tierMap[rawTier] || "—";
+
+  // Entry & SL
+  const entryPrice = signal.entry_price  != null ? signal.entry_price : "—";
+  const stopLoss   = signal.sl_price     != null ? signal.sl_price    : "—";
+
+  // Stats formatting
+  const winRate = verified?.win_rate != null
+    ? `${(verified.win_rate * 100).toFixed(1)}%`
+    : "—";
+  const trades = verified?.total_trades ?? "—";
+  const profitFactor = verified?.profit_factor != null
+    ? verified.profit_factor.toFixed(2)
+    : "—";
+  const avgPnl = verified?.avg_pnl != null
+    ? `${verified.avg_pnl.toFixed(2)}%`
+    : "—";
+
+  const notesText = verified?.notes || "—";
   const tfLabel = `${signal.timeframe}m`;
-  const tier = verified?.tier || "—";
-  const winRate = verified?.win_rate ? `${verified.win_rate.toFixed(0)}%` : "—";
-  const trades = verified?.total_trades || "—";
-  const pf = verified?.profit_factor?.toFixed(2) || "—";
-  const pnl = verified?.avg_pnl?.toFixed(1) || "—";
-  const notes = verified?.notes || "—";
-  const entry = signal.entry_price ?? "—";
-  const sl = signal.sl_price ?? "—";
 
   return `
-🚨 *New GOD Complex Setup Alert*
+${tierLabel} Signal Alert
 
 📈 Symbol: *${signal.symbol}*
 🕐 Timeframe: *${tfLabel}*
 📊 Setup: *${signal.setup}*
 
-🎯 Entry Price: *${entry}*
-🛡️ Stop Loss: *${sl}*
+🎯 Entry Price: *${entryPrice}*
+🛡️ Stop Loss: *${stopLoss}*
 
-📌 Tier: *${tier}*
-📌 Win Rate: *${winRate}* 
-Trades: ${trades} trades
-📌 Profit Factor: *${pf}*
-📌 Avg PnL: *${pnl}R*
+📌 Tier: *${tierLabel}*
+📌 Win Rate: *${winRate}*
+📌 Trades: ${trades}
+📌 Profit Factor: *${profitFactor}*
+📌 Avg PnL: *${avgPnl}*
 
-📎 Notes: ${notes}
+📎 Notes: ${notesText}
 
 👉 Check the dashboard to view the full setup.
-`.trim();
+  `.trim();
 }
 
 // Build a unique key: use non‐empty id, else symbol_timestamp
