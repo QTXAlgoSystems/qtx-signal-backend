@@ -757,13 +757,21 @@ app.post("/api/send-followup-alert", async (req, res) => {
 
     // 3) Loop & dedupe per (uid, user_id, type)
     for (const { user_id } of recipients) {
-      // 3a) Attempt to record this follow-up; skip if already sent
-      const { error: dupError } = await supabase
+      // 3a) Upsert this follow-up record so even existing rows get refreshed
+      const { error: upError } = await supabase
         .from("sent_telegram_alerts")
-        .insert({ uid, user_id, alert_type: type });
+        .upsert(
+          {
+            uid,
+            user_id,
+            alert_type: type,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: ['uid','user_id','alert_type'] }
+        );
     
-      if (dupError) {
-        console.log(`⏭️ Follow-up ${type} for ${uid} already recorded for user ${user_id}`);
+      if (upError) {
+        console.error("⚠️ Could not upsert follow-up record:", upError);
         continue;
       }
     
