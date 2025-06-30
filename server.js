@@ -761,12 +761,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
       const { error: upError } = await supabase
         .from("sent_telegram_alerts")
         .upsert(
-          {
-            uid,
-            user_id,
-            alert_type: type,
-            updated_at: new Date().toISOString()
-          },
+          { uid, user_id, alert_type: type },
           { onConflict: ['uid','user_id','alert_type'] }
         );
     
