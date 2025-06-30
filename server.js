@@ -761,12 +761,12 @@ app.post("/api/send-followup-alert", async (req, res) => {
       const { error: dupError } = await supabase
         .from("sent_telegram_alerts")
         .insert({ uid, user_id, alert_type: type });
-
+    
       if (dupError) {
-        // Already sent this update type for this user
+        console.log(`⏭️ Follow-up ${type} for ${uid} already recorded for user ${user_id}`);
         continue;
       }
-
+    
       // 3b) Fetch their verified chat ID
       const { data: link, error: linkError } = await supabase
         .from("telegram_links")
@@ -774,18 +774,18 @@ app.post("/api/send-followup-alert", async (req, res) => {
         .eq("user_id", user_id)
         .eq("verified", true)
         .single();
-
+    
       if (linkError || !link) {
-        console.error("❌ Could not fetch Telegram link for user", user_id, linkError);
+        console.log(`⏭️ No verified telegram link for user ${user_id}`, linkError);
         continue;
       }
-
+    
       // 3c) Send the follow-up alert
       try {
         await bot.sendMessage(link.telegram_chat_id, message, {
           parse_mode: "Markdown",
         });
-        console.log(`🔔 Follow-up ${type} sent to`, link.telegram_chat_id);
+        console.log(`🔔 Follow-up ${type} sent to ${link.telegram_chat_id}`);
       } catch (err) {
         console.error(`🚫 Failed to send follow-up ${type} to ${link.telegram_chat_id}:`, err);
       }
