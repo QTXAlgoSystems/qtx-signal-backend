@@ -63,41 +63,51 @@ app.get("/api/check-telegram-status", async (req, res) => {
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal for Telegram:", signal.uid);
 
-  // 1) Grab all users who’ve linked Telegram
+  // 1) Fetch all verified Telegram links
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
     .select("user_id, telegram_chat_id")
     .eq("verified", true);
 
-  if (linkError) {
-    console.error("❌ Failed to fetch telegram_links:", linkError);
+  if (linkError || !telegramUsers?.length) {
+    console.error("❌ Failed to fetch telegram_links or none found:", linkError);
     return;
   }
 
   // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
-    // 2a) Attempt to record the *initial* alert (alert_type = "")
+    // 2a) Dedupe initial alert via DB
     const { error: dupError } = await supabase
       .from("sent_telegram_alerts")
       .insert({ uid: signal.uid, user_id, alert_type: "" });
 
     if (dupError) {
-      // Duplicate insert → alert already sent to this user
+      // Already sent this alert to this user
       continue;
     }
 
-    // 2b) Check they still have Telegram enabled
+    // 2b) Load their full alert preferences
     const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
-      .select("telegram")
+      .select("telegram, symbols, timeframes, tiers")
       .eq("user_id", user_id)
       .single();
 
     if (prefsError || !prefs?.telegram) {
-      continue;
+      continue; // skip if Telegram is off or prefs missing
     }
 
-    // 3) Send the pre-built message from the front end
+    // 2c) Apply symbol/timeframe/tier filters
+    const { symbols = [], timeframes = [], tiers = [] } = prefs;
+    if (
+      (symbols.length    && !symbols.includes(signal.symbol))    ||
+      (timeframes.length && !timeframes.includes(signal.timeframe)) ||
+      (tiers.length      && !tiers.includes(signal.tier))
+    ) {
+      continue; // user didn’t opt into this combination
+    }
+
+    // 3) Send the prebuilt message
     try {
       const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
