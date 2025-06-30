@@ -725,7 +725,7 @@ app.post("/api/send-signal", async (req, res) => {
 });
 
 app.post("/api/send-followup-alert", async (req, res) => {
-  const { uid, symbol, timeframe, setup, type, pnl, time } = req.body;
+  const { uid, symbol, timeframe, setup, tier, type, pnl, time } = req.body;
   console.log("📣 Follow-up alert received:", req.body);
 
   try {
@@ -766,7 +766,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
         console.error("⚠️ Could not upsert follow-up record:", upError);
         continue;
       }
-
+      
       // 3b) Load their current prefs
       const { data: prefs, error: prefsError } = await supabase
         .from("user_alerts")
@@ -776,15 +776,15 @@ app.post("/api/send-followup-alert", async (req, res) => {
       if (prefsError || !prefs?.telegram) {
         continue;  // they turned off Telegram
       }
-
+      
       // 3c) Re-apply symbol/timeframe/tier filters
-      const { symbols = [], timeframes = [], tiers = [] } = prefs;
+      const { symbols = [], timeframes = [], tiers: allowedTiers = [] } = prefs;
       if (
         (symbols.length    && !symbols.includes(symbol))    ||
         (timeframes.length && !timeframes.includes(timeframe)) ||
-        (tiers.length      && !tiers.includes(type === "SL" ? prefs.tiers : signal.tier))
+        (allowedTiers.length && !allowedTiers.includes(tier))
       ) {
-        continue;  // no longer subscribed to this combo or tier
+        continue;  // user isn’t subscribed to this symbol/timeframe/tier
       }
 
       // 3d) Fetch their chat ID and send
