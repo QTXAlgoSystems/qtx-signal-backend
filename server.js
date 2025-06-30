@@ -729,22 +729,23 @@ app.post("/api/send-followup-alert", async (req, res) => {
   console.log("📣 Follow-up alert received:", req.body);
 
   try {
-    // 1) Find users who received the original signal
+    // 1) Find users who received the original alert
     const { data: recipients, error: recError } = await supabase
       .from("sent_telegram_alerts")
       .select("user_id")
-      .eq("uid", uid);
+      .eq("uid", uid)
+      .eq("alert_type", "");             // only those who got the entry
 
     if (recError) {
       console.error("❌ Error fetching recipients:", recError);
       return res.status(500).json({ error: "DB error" });
     }
     if (!recipients.length) {
-      console.log("⚠️ No users found for this signal:", uid);
+      console.log("⚠️ No users found for initial alert:", uid);
       return res.status(200).json({ message: "No recipients" });
     }
 
-    // 2) Prepare the follow-up message
+    // 2) Prepare message text
     const formattedTime = time
       ? new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown time";
@@ -752,46 +753,61 @@ app.post("/api/send-followup-alert", async (req, res) => {
 🕒 Time: ${formattedTime}
 📈 PnL: ${pnl?.toFixed(2)}%`;
 
-    // 3) Loop & dedupe per (uid, user_id, type)
+    // 3) Loop over those users
     for (const { user_id } of recipients) {
-      // 3a) Upsert this follow-up record so even existing rows get refreshed
+      // 3a) Upsert the follow-up record (so next time it won't redo)
       const { error: upError } = await supabase
         .from("sent_telegram_alerts")
         .upsert(
           { uid, user_id, alert_type: type },
           { onConflict: ['uid','user_id','alert_type'] }
         );
-    
       if (upError) {
         console.error("⚠️ Could not upsert follow-up record:", upError);
         continue;
       }
-    
-      // 3b) Fetch their verified chat ID
+
+      // 3b) Load their current prefs
+      const { data: prefs, error: prefsError } = await supabase
+        .from("user_alerts")
+        .select("telegram, symbols, timeframes, tiers")
+        .eq("user_id", user_id)
+        .single();
+      if (prefsError || !prefs?.telegram) {
+        continue;  // they turned off Telegram
+      }
+
+      // 3c) Re-apply symbol/timeframe/tier filters
+      const { symbols = [], timeframes = [], tiers = [] } = prefs;
+      if (
+        (symbols.length    && !symbols.includes(symbol))    ||
+        (timeframes.length && !timeframes.includes(timeframe)) ||
+        (tiers.length      && !tiers.includes(type === "SL" ? prefs.tiers : signal.tier))
+      ) {
+        continue;  // no longer subscribed to this combo or tier
+      }
+
+      // 3d) Fetch their chat ID and send
       const { data: link, error: linkError } = await supabase
         .from("telegram_links")
         .select("telegram_chat_id")
         .eq("user_id", user_id)
         .eq("verified", true)
         .single();
-    
       if (linkError || !link) {
-        console.log(`⏭️ No verified telegram link for user ${user_id}`, linkError);
+        console.error("⏭️ No valid Telegram link for user", user_id);
         continue;
       }
-    
-      // 3c) Send the follow-up alert
+
       try {
-        await bot.sendMessage(link.telegram_chat_id, message, {
-          parse_mode: "Markdown",
-        });
+        await bot.sendMessage(link.telegram_chat_id, message, { parse_mode: "Markdown" });
         console.log(`🔔 Follow-up ${type} sent to ${link.telegram_chat_id}`);
       } catch (err) {
         console.error(`🚫 Failed to send follow-up ${type} to ${link.telegram_chat_id}:`, err);
       }
     }
 
-    res.status(200).json({ success: true });
+    res.json({ success: true });
   } catch (err) {
     console.error("❌ Error in follow-up alert handler:", err);
     res.status(500).json({ error: "Internal error" });
