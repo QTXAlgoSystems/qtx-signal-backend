@@ -79,7 +79,7 @@ async function sendTelegramAlertsForSignal(signal) {
     // 2a) Record the initial send (alert_type = "")
     const { error: dupError } = await supabase
       .from("sent_telegram_alerts")
-      .insert({ uid: signal.uid, user_id, alert_type: "" });
+      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY" });
     if (dupError) {
       continue; // already sent
     }
@@ -734,7 +734,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
       .from("sent_telegram_alerts")
       .select("user_id")
       .eq("uid", uid)
-      .eq("alert_type", "");             // only those who got the entry
+      .eq("alert_type", "ENTRY");             // only those who got the entry
 
     if (recError) {
       console.error("❌ Error fetching recipients:", recError);
