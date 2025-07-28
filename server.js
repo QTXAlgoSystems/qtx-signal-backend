@@ -714,15 +714,25 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
   }
 });
 
-// ✅ Endpoint to receive and process new trade signal
+// ✅ Enhanced logging for /api/send-signal
 app.post("/api/send-signal", async (req, res) => {
-  console.log("🔔 /api/send-signal hit with:", req.body);
+  const { uid, telegramTitle, telegramBody } = req.body;
+
+  console.log("🔔 /api/send-signal hit");
+  console.log("UID:           ", uid);
+  console.log("Title:         ", telegramTitle);
+  console.log("Body:          ", telegramBody);
+  console.log("Source IP:     ", req.headers["x-forwarded-for"] || req.ip);
+  console.log("User-Agent:    ", req.headers["user-agent"]);
+  console.log("Referer:       ", req.headers["referer"] || "none");
+  console.log("Timestamp:     ", new Date().toISOString());
+  console.log("Headers:       ", req.headers);
 
   try {
     await sendTelegramAlertsForSignal(req.body);
-    console.log("🔔 Completed sendTelegramAlertsForSignal for UID:", req.body.uid);
+    console.log("✅ Alert sent for UID:", uid);
   } catch (err) {
-    console.error("❌ sendTelegramAlertsForSignal threw:", err);
+    console.error("❌ Error sending alert for UID:", uid, err);
   }
 
   res.sendStatus(200);
