@@ -76,35 +76,30 @@ async function sendTelegramAlertsForSignal(signal) {
 
   // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
-    // 2a) Record the initial send (alert_type = "")
-    const { error: dupError } = await supabase
-      .from("sent_telegram_alerts")
-      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY" });
-    if (dupError) {
-      continue; // already sent
-    }
-
-    // 2b) Load their alert preferences
+    // ⛔ skip if signal is not verified
+    if (!signal.verifiedMatch) continue;
+  
+    // load prefs
     const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("telegram, symbols, timeframes, tiers")
       .eq("user_id", user_id)
       .single();
-    if (prefsError || !prefs?.telegram) {
-      continue; // Telegram off or no prefs
-    }
-
-    // 2c) Apply the same symbol/timeframe/tier filters
+    if (prefsError || !prefs?.telegram) continue;
+  
     const { symbols = [], timeframes = [], tiers = [] } = prefs;
     if (
       (symbols.length    && !symbols.includes(signal.symbol))    ||
       (timeframes.length && !timeframes.includes(signal.timeframe)) ||
       (tiers.length      && !tiers.includes(signal.tier))
-    ) {
-      continue; // user not subscribed to this combo
-    }
-
-    // 3) Send the prebuilt Telegram message
+    ) continue;
+  
+    // ✅ only now record + send alert
+    const { error: dupError } = await supabase
+      .from("sent_telegram_alerts")
+      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY" });
+    if (dupError) continue;
+  
     try {
       const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
