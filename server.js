@@ -63,25 +63,11 @@ app.get("/api/check-telegram-status", async (req, res) => {
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal for Telegram:", signal.uid);
 
-  // ⛔ STOP if this signal no longer matches a verified setup
-  const { data: setups, error: setupError } = await supabase
-    .from("verified_setups")
-    .select("symbol")
-    .eq("symbol", signal.symbol)
-    .eq("timeframe", signal.timeframe)
-    .eq("setup", signal.setup)
-    .eq("notes", signal.notes); // Adjust if your notes pattern is more exact
-
-  if (setupError) {
-    console.error("❌ Failed to query verified_setups:", setupError);
+  if (!signal.telegramBody || !signal.telegramTitle) {
+    console.warn("⚠️ Missing telegramBody or title — skipping:", signal.uid);
     return;
   }
 
-  if (!setups?.length) {
-    console.warn("⚠️ No verified setup match found, skipping Telegram alert for:", signal.symbol, signal.timeframe, signal.setup);
-    return;
-  }
-  
   // 1) Fetch all verified Telegram links
   const { data: telegramUsers, error: linkError } = await supabase
     .from("telegram_links")
