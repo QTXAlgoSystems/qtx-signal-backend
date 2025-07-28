@@ -714,29 +714,28 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
   }
 });
 
-// ✅ Enhanced logging for /api/send-signal
+// ✅ Bulletproof: Reject rogue payloads (like ones with Median)
 app.post("/api/send-signal", async (req, res) => {
   const { uid, telegramTitle, telegramBody } = req.body;
 
   console.log("🔔 /api/send-signal hit");
-  console.log("UID:            ", uid);
-  console.log("Title:          ", telegramTitle);
-  console.log("Body:           ", telegramBody);
-  const includesMedian = telegramBody?.toLowerCase().includes("median") || false;
-  console.log("Includes Median:", includesMedian);
-  console.log("Source IP:      ", req.headers["x-forwarded-for"]);
-  console.log("User-Agent:     ", req.headers["user-agent"]);
-  console.log("Referer:        ", req.headers["referer"]);
-  console.log("Timestamp:      ", new Date().toISOString());
-  console.log("Headers:        ", req.headers);
+  console.log("UID:             ", uid);
+  console.log("Title:           ", telegramTitle);
+  console.log("Body:            ", telegramBody);
 
-  // 🚨 Only log trace if Median is present
+  const includesMedian = telegramBody?.toLowerCase().includes("median") || false;
+  console.log("Includes Median: ", includesMedian);
+  console.log("Source IP:       ", req.headers["x-forwarded-for"]);
+  console.log("User-Agent:      ", req.headers["user-agent"]);
+  console.log("Referer:         ", req.headers["referer"]);
+  console.log("Timestamp:       ", new Date().toISOString());
+  console.log("Headers:         ", req.headers);
+
+  // 🚫 Hard block if any payload contains "Median" (from legacy or rogue sources)
   if (includesMedian) {
-    console.warn("🚨 TELEGRAM BODY CONTAINS MEDIAN — POSSIBLE ROGUE SOURCE");
-    console.log("🔍 UID:", uid);
-    console.log("🔍 Title:", telegramTitle);
-    console.log("🔍 Body:", telegramBody);
-    console.trace("📍 Trace for Median-containing payload");
+    console.warn("🚨 BLOCKED: telegramBody includes 'median' — unauthorized payload");
+    console.trace("📍 Trace for blocked Median payload");
+    return res.status(200).json({ blocked: true });
   }
 
   try {
