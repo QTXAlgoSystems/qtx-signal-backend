@@ -747,8 +747,8 @@ app.post("/api/send-followup-alert", async (req, res) => {
     const tierLabel = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "—";    
     const message = `🔁 *${type} Update* for *${symbol}* ${timeframe}min • *${tierLabel}*
     Setup: ${setup}
-    PnL: ${pnl?.toFixed(2)}%`;
-    Time: ${formattedTime}
+    PnL: ${pnl?.toFixed(2)}%`
+    Time: ${formattedTime};
 
     // 3) Loop over those users
     for (const { user_id } of recipients) {
