@@ -191,6 +191,12 @@ app.post("/webhook", async (req, res) => {
   const id      = payload.id.trim();
   const isEntry = !payload.tp1Hit && !payload.tp2Hit && !payload.slHit;
 
+  // ⛔ Never send alerts directly from /webhook — alerts must come from script.js only
+  if (payload.telegramTitle || payload.telegramBody) {
+    console.warn("⛔ Payload contains Telegram fields — skipping alert for:", id);
+    return res.status(200).end(); // Still acknowledge as received
+  }
+  
   // ── ENTRY: insert new signal ───────────────────────────────
   if (isEntry) {
     // 1) parse & normalize the raw tf string into numeric minutes
