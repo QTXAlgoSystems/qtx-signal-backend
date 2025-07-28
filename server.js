@@ -716,14 +716,19 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
 
 // ✅ Enhanced logging for /api/send-signal
 app.post("/api/send-signal", async (req, res) => {
-  const { uid, telegramBody, telegramTitle } = req.body;
+  const { uid, telegramTitle, telegramBody } = req.body;
 
   console.log("🔔 /api/send-signal hit");
   console.log("UID:           ", uid);
   console.log("Title:         ", telegramTitle);
   console.log("Body:          ", telegramBody);
-  console.log("Includes Median:", telegramBody.includes("Median"));
+  console.log("Includes Median:", telegramBody?.toLowerCase().includes("median"));
   console.trace("📍 Call stack for debug (trace):");
+  console.log("Source IP:     ", req.headers["x-forwarded-for"]);
+  console.log("User-Agent:    ", req.headers["user-agent"]);
+  console.log("Referer:       ", req.headers["referer"]);
+  console.log("Timestamp:     ", new Date().toISOString());
+  console.log("Headers:       ", req.headers);
 
   try {
     await sendTelegramAlertsForSignal(req.body);
