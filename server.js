@@ -749,10 +749,11 @@ app.post("/api/send-followup-alert", async (req, res) => {
     const formattedTime = time
       ? new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown time";
-    const message = `🔁 *${type} Update* for *${symbol}* ${timeframe}min ${setup}
-    🏷️ Tier: *${tier || "—"}*
-    🕒 Time: ${formattedTime}
-    📈 PnL: ${pnl?.toFixed(2)}%`;
+    const tierLabel = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "—";    
+    const message = `🔁 *${type} Update* for *${symbol}* ${timeframe}min • *${tierLabel}*
+    Setup: ${setup}
+    Time: ${formattedTime}
+    PnL: ${pnl?.toFixed(2)}%`;
 
     // 3) Loop over those users
     for (const { user_id } of recipients) {
