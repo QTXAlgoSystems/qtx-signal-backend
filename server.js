@@ -719,16 +719,25 @@ app.post("/api/send-signal", async (req, res) => {
   const { uid, telegramTitle, telegramBody } = req.body;
 
   console.log("🔔 /api/send-signal hit");
-  console.log("UID:           ", uid);
-  console.log("Title:         ", telegramTitle);
-  console.log("Body:          ", telegramBody);
-  console.log("Includes Median:", telegramBody?.toLowerCase().includes("median"));
-  console.trace("📍 Call stack for debug (trace):");
-  console.log("Source IP:     ", req.headers["x-forwarded-for"]);
-  console.log("User-Agent:    ", req.headers["user-agent"]);
-  console.log("Referer:       ", req.headers["referer"]);
-  console.log("Timestamp:     ", new Date().toISOString());
-  console.log("Headers:       ", req.headers);
+  console.log("UID:            ", uid);
+  console.log("Title:          ", telegramTitle);
+  console.log("Body:           ", telegramBody);
+  const includesMedian = telegramBody?.toLowerCase().includes("median") || false;
+  console.log("Includes Median:", includesMedian);
+  console.log("Source IP:      ", req.headers["x-forwarded-for"]);
+  console.log("User-Agent:     ", req.headers["user-agent"]);
+  console.log("Referer:        ", req.headers["referer"]);
+  console.log("Timestamp:      ", new Date().toISOString());
+  console.log("Headers:        ", req.headers);
+
+  // 🚨 Only log trace if Median is present
+  if (includesMedian) {
+    console.warn("🚨 TELEGRAM BODY CONTAINS MEDIAN — POSSIBLE ROGUE SOURCE");
+    console.log("🔍 UID:", uid);
+    console.log("🔍 Title:", telegramTitle);
+    console.log("🔍 Body:", telegramBody);
+    console.trace("📍 Trace for Median-containing payload");
+  }
 
   try {
     await sendTelegramAlertsForSignal(req.body);
