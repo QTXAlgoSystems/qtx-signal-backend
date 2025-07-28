@@ -76,8 +76,6 @@ async function sendTelegramAlertsForSignal(signal) {
 
   // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
-    // ⛔ skip if signal is not verified
-    if (!signal.verifiedMatch) continue;
   
     // load prefs
     const { data: prefs, error: prefsError } = await supabase
