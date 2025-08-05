@@ -306,13 +306,13 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ ignored: true });
     }
 
-    // 💡 Determine verified setup match (same logic as frontend)
+    // 💡 Determine verified  match (same logic as frontend)
     const { data: verifiedMatch } = await supabase
-      .from("verified_setups")
+      .from("verified_s")
       .select("*")
       .or(`symbol.eq.${sym},proxy_symbol.eq.${sym}`)
       .eq("timeframe", timeframe)
-      .eq("setup", payload.tradeType)
+      .eq("", payload.tradeType)
       .maybeSingle();
     
     const statsForTier = verifiedMatch
@@ -332,7 +332,7 @@ app.post("/webhook", async (req, res) => {
       .insert([{
         trade_id:   id,               // ← write into trade_id, not id
         timeframe:  timeframe, 
-        setup:      payload.tradeType,
+        :      payload.tradeType,
         direction:  payload.direction,
         entryprice: payload.entryPrice,
         score:      payload.score,
@@ -791,7 +791,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
       : "Unknown time";
     const tierLabel = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "—";    
     const message = `🔁 *${type} Update* for *${symbol}* ${timeframe}min • *${tierLabel}*
-    Setup: ${setup}
+    Setup: Opposite to ${setup}
     PnL: ${pnl?.toFixed(2)}%
     Time: ${formattedTime}`;
 
