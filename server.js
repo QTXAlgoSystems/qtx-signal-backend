@@ -104,7 +104,7 @@ async function sendTelegramAlertsForSignal(signal) {
     if (dupError) continue;
   
     try {
-      const text = ${signal.telegramTitle}\n\n${signal.telegramBody};
+      const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
       console.log(🔔 Initial alert sent to ${telegram_chat_id});
     } catch (err) {
