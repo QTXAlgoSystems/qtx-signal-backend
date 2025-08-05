@@ -104,11 +104,11 @@ async function sendTelegramAlertsForSignal(signal) {
     if (dupError) continue;
   
     try {
-      const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
+      const text = ${signal.telegramTitle}\n\n${signal.telegramBody};
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
-      console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
+      console.log(🔔 Initial alert sent to ${telegram_chat_id});
     } catch (err) {
-      console.error(`🚫 Failed to send initial alert to ${telegram_chat_id}:`, err);
+      console.error(🚫 Failed to send initial alert to ${telegram_chat_id}:, err);
     }
   }
 }
@@ -748,17 +748,33 @@ app.post("/api/send-signal", async (req, res) => {
   res.sendStatus(200);
 });
 
+// In-memory dedup cache for follow-up alerts
+const sentFollowUpCache = new Set();
+const FOLLOWUP_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
+
 app.post("/api/send-followup-alert", async (req, res) => {
   const { uid, symbol, timeframe, setup, tier, type, pnl, time } = req.body;
   console.log("📣 Follow-up alert received:", req.body);
 
   try {
-    // 1) Find users who received the original alert
+    const followUpKey = `${uid}|${type.trim().toUpperCase()}`;
+
+    // 🚫 In-memory dedup check
+    if (sentFollowUpCache.has(followUpKey)) {
+      console.warn(`⏭️ Skipping duplicate follow-up alert: ${followUpKey}`);
+      return res.status(200).json({ skipped: true, reason: "duplicate" });
+    }
+
+    // Add to in-memory cache & schedule removal
+    sentFollowUpCache.add(followUpKey);
+    setTimeout(() => sentFollowUpCache.delete(followUpKey), FOLLOWUP_CACHE_TTL);
+
+    // 1) Find users who got the original entry alert
     const { data: recipients, error: recError } = await supabase
       .from("sent_telegram_alerts")
       .select("user_id")
       .eq("uid", uid)
-      .eq("alert_type", "ENTRY");             // only those who got the entry
+      .eq("alert_type", "ENTRY");
 
     if (recError) {
       console.error("❌ Error fetching recipients:", recError);
@@ -769,7 +785,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
       return res.status(200).json({ message: "No recipients" });
     }
 
-    // 2) Prepare message text
+    // 2) Prepare message
     const formattedTime = time
       ? new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown time";
@@ -779,52 +795,47 @@ app.post("/api/send-followup-alert", async (req, res) => {
     PnL: ${pnl?.toFixed(2)}%
     Time: ${formattedTime}`;
 
-    // 3) Loop over those users
+    // 3) Loop over recipients
     for (const { user_id } of recipients) {
-      // 3a) Upsert the follow-up record (so next time it won't redo)
+      // DB dedup: avoid re-sending to same user
       const { error: upError } = await supabase
         .from("sent_telegram_alerts")
         .upsert(
-          { uid, user_id, alert_type: type },
-          { onConflict: ['uid','user_id','alert_type'] }
+          { uid, user_id, alert_type: type.trim().toUpperCase() },
+          { onConflict: ['uid', 'user_id', 'alert_type'] }
         );
       if (upError) {
         console.error("⚠️ Could not upsert follow-up record:", upError);
         continue;
       }
-      
-      // 3b) Load their current prefs
+
+      // Check prefs
       const { data: prefs, error: prefsError } = await supabase
         .from("user_alerts")
         .select("telegram, symbols, timeframes, tiers")
         .eq("user_id", user_id)
         .single();
-      if (prefsError || !prefs?.telegram) {
-        continue;  // they turned off Telegram
-      }
-      
-      // 3c) Re-apply symbol/timeframe/tier filters
+      if (prefsError || !prefs?.telegram) continue;
+
       const { symbols = [], timeframes = [], tiers: allowedTiers = [] } = prefs;
       if (
         (symbols.length    && !symbols.includes(symbol))    ||
         (timeframes.length && !timeframes.includes(timeframe)) ||
         (allowedTiers.length && !allowedTiers.includes(tier))
       ) {
-        continue;  // user isn’t subscribed to this symbol/timeframe/tier
+        continue;
       }
 
-      // 3d) Fetch their chat ID and send
+      // Get Telegram chat ID
       const { data: link, error: linkError } = await supabase
         .from("telegram_links")
         .select("telegram_chat_id")
         .eq("user_id", user_id)
         .eq("verified", true)
         .single();
-      if (linkError || !link) {
-        console.error("⏭️ No valid Telegram link for user", user_id);
-        continue;
-      }
+      if (linkError || !link) continue;
 
+      // Send message
       try {
         await bot.sendMessage(link.telegram_chat_id, message, { parse_mode: "Markdown" });
         console.log(`🔔 Follow-up ${type} sent to ${link.telegram_chat_id}`);
