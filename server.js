@@ -332,7 +332,7 @@ app.post("/webhook", async (req, res) => {
       .insert([{
         trade_id:   id,               // ← write into trade_id, not id
         timeframe:  timeframe, 
-        :      payload.tradeType,
+        setup:      payload.tradeType,
         direction:  payload.direction,
         entryprice: payload.entryPrice,
         score:      payload.score,
