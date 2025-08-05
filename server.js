@@ -108,7 +108,7 @@ async function sendTelegramAlertsForSignal(signal) {
       await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
       console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
     } catch (err) {
-      console.error(🚫 Failed to send initial alert to ${telegram_chat_id}:, err);
+      console.error(`🚫 Failed to send initial alert to ${telegram_chat_id}:`, err);
     }
   }
 }
