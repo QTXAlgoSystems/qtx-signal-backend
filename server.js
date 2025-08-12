@@ -64,16 +64,16 @@ app.get("/api/check-telegram-status", async (req, res) => {
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal for Telegram:", signal.uid);
 
-  // 0) Trust the frontend decision: must have title/body from script.js
-  if (!signal?.telegramBody || !signal?.telegramTitle) {
-    console.warn("⚠️ Missing telegramBody or telegramTitle — skipping:", signal?.uid);
+  // 0) Trust the frontend decision: must have title/body AND FE key
+  if (!signal?.telegramBody || !signal?.telegramTitle || !signal?.key) {
+    console.warn("⚠️ Missing telegramBody/telegramTitle/key — skipping:", signal?.uid);
     return;
   }
 
-  // 0.1) Normalize types for user prefs checks (avoid number vs string mismatches)
+  // 0.1) Normalize for user prefs checks only (NOT for deciding)
   const sigSymbol    = String(signal.symbol || "").trim();
   const sigTimeframe = String(signal.timeframe || "").trim();
-  const sigTier      = String(signal.tier ?? "").trim();
+  const sigTier      = String(signal.tier ?? "").trim(); // tier is just for user filters
 
   // 1) Fetch all verified Telegram links
   const { data: telegramUsers, error: linkError } = await supabase
@@ -86,9 +86,25 @@ async function sendTelegramAlertsForSignal(signal) {
     return;
   }
 
+  // 1.1) OPTIONAL: Global idempotency by FE key (one-time guard)
+  // Create a table with UNIQUE(key) or add 'key' column to sent_telegram_alerts with a unique index.
+  const { error: keyInsertErr } = await supabase
+    .from("sent_telegram_alerts_keys")  // <- make this table with columns: key TEXT PRIMARY KEY, created_at TIMESTAMP DEFAULT now()
+    .insert({ key: signal.key });
+
+  if (keyInsertErr && keyInsertErr.code !== "23505") {
+    console.warn("⚠️ Global key insert failed:", keyInsertErr?.message);
+    // Continue — we'll still dedupe per user below
+  }
+  if (keyInsertErr && keyInsertErr.code === "23505") {
+    console.log("🔁 Duplicate FE key — already processed:", signal.key);
+    // You can return here to skip per-user loop entirely if you like:
+    // return;
+  }
+
   // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
-    // 2a) Load user prefs (only filter on user’s personal prefs — NOT setup logic)
+    // 2a) User prefs (symbols/timeframes/tiers)
     const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("telegram, symbols, timeframes, tiers")
@@ -107,45 +123,47 @@ async function sendTelegramAlertsForSignal(signal) {
       continue;
     }
 
-    // 2b) Idempotency: skip if we've already sent this ENTRY for this user
+    // 2b) Per-user idempotency by FE key
     const { data: existing, error: existErr } = await supabase
       .from("sent_telegram_alerts")
       .select("id")
-      .eq("uid", signal.uid)
       .eq("user_id", user_id)
+      .eq("key", signal.key)           // 🔑 use the FE key, not just uid
       .eq("alert_type", "ENTRY")
       .limit(1);
 
     if (!existErr && existing?.length) {
-      // already sent to this user
-      continue;
+      continue; // already sent to this user for this exact FE decision
     }
 
     // 2c) Record first (so a crash still prevents dupes next loop)
     const { error: insertErr } = await supabase
       .from("sent_telegram_alerts")
-      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY" });
+      .insert({
+        uid: signal.uid,
+        user_id,
+        alert_type: "ENTRY",
+        key: signal.key               // 🔑 store the key
+      });
 
     if (insertErr) {
-      // if you add a unique index, conflict shows up here; just skip
       console.warn("⚠️ Insert duplicate or error, skipping send:", insertErr?.message);
       continue;
     }
 
-    // 2d) Send message — no Markdown parsing to avoid accidental formatting breaks
+    // 2d) Send exactly what FE chose — no extra emoji, no parse_mode surprises
     try {
       const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
-      await bot.sendMessage(telegram_chat_id, text); // ← removed parse_mode
+      await bot.sendMessage(telegram_chat_id, text);
       console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
     } catch (err) {
       console.error(`🚫 Failed to send initial alert to ${telegram_chat_id}:`, err);
-
-      // Optional: mark failed send in DB
+      // Optional: flag failure
       await supabase
         .from("sent_telegram_alerts")
         .update({ /* success: false */ })
-        .eq("uid", signal.uid)
         .eq("user_id", user_id)
+        .eq("key", signal.key)
         .eq("alert_type", "ENTRY");
     }
   }
@@ -752,11 +770,9 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
   }
 });
 
-// ✅ Bulletproof: Reject rogue payloads (like ones with "median")
 app.post("/api/send-signal", async (req, res) => {
-  const { uid, telegramTitle, telegramBody, symbol, timeframe, tier } = req.body || {};
+  const { uid, key, telegramTitle, telegramBody, symbol, timeframe, tier } = req.body || {};
 
-  // (optional) super-simple shared secret; set QTX_NOTIFY_KEY in env if you want it
   if (process.env.QTX_NOTIFY_KEY) {
     const k = req.get("X-QTX-Notify-Key") || "";
     if (k !== process.env.QTX_NOTIFY_KEY) {
@@ -765,15 +781,13 @@ app.post("/api/send-signal", async (req, res) => {
     }
   }
 
-  // Basic validation — we only relay if the browser already formatted title/body
-  if (!uid || !telegramTitle || !telegramBody) {
-    console.warn("⚠️ Missing uid/title/body — skipping relay");
+  if (!uid || !key || !telegramTitle || !telegramBody) {      // ← require key
+    console.warn("⚠️ Missing uid/key/title/body — skipping relay");
     return res.status(400).json({ ok: false, error: "missing fields" });
   }
 
   console.log("🔔 /api/send-signal hit", { uid, symbol, timeframe, tier });
 
-  // 🚫 Hard block if any payload contains "median" (legacy/rogue sources)
   const hasMedian = (typeof telegramBody === "string") && telegramBody.toLowerCase().includes("median");
   if (hasMedian) {
     console.warn("🚨 BLOCKED: telegramBody includes 'median' — unauthorized payload");
@@ -781,7 +795,7 @@ app.post("/api/send-signal", async (req, res) => {
   }
 
   try {
-    await sendTelegramAlertsForSignal({ uid, telegramTitle, telegramBody, symbol, timeframe, tier });
+    await sendTelegramAlertsForSignal({ uid, key, telegramTitle, telegramBody, symbol, timeframe, tier }); // ← pass key down
     console.log("✅ Alert relayed for UID:", uid);
     return res.status(200).json({ ok: true });
   } catch (err) {
