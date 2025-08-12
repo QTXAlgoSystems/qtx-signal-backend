@@ -872,7 +872,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
         await bot.sendMessage(link.telegram_chat_id, `🔁 ${telegramTitle}\n\n${telegramBody}`);
       } catch (err) {
         await supabase.from("sent_telegram_alerts")
-          .update({ success: false })
+          .update({})
           .eq("uid", uid).eq("user_id", user_id).eq("alert_type", typeKey);
       }
     }
