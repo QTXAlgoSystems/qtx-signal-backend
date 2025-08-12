@@ -134,7 +134,7 @@ async function sendTelegramAlertsForSignal(signal) {
 
     // 2d) Send message — no Markdown parsing to avoid accidental formatting breaks
     try {
-      const text = `🟣 ${signal.telegramTitle}\n\n${signal.telegramBody}`;
+      const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text); // ← removed parse_mode
       console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
     } catch (err) {
