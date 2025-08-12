@@ -60,13 +60,20 @@ app.get("/api/check-telegram-status", async (req, res) => {
   }
 });
 
+// Keep as the ONLY path that sends Telegram
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal for Telegram:", signal.uid);
 
-  if (!signal.telegramBody || !signal.telegramTitle) {
-    console.warn("⚠️ Missing telegramBody or title — skipping:", signal.uid);
+  // 0) Trust the frontend decision: must have title/body from script.js
+  if (!signal?.telegramBody || !signal?.telegramTitle) {
+    console.warn("⚠️ Missing telegramBody or telegramTitle — skipping:", signal?.uid);
     return;
   }
+
+  // 0.1) Normalize types for user prefs checks (avoid number vs string mismatches)
+  const sigSymbol    = String(signal.symbol || "").trim();
+  const sigTimeframe = String(signal.timeframe || "").trim();
+  const sigTier      = String(signal.tier ?? "").trim();
 
   // 1) Fetch all verified Telegram links
   const { data: telegramUsers, error: linkError } = await supabase
@@ -81,34 +88,65 @@ async function sendTelegramAlertsForSignal(signal) {
 
   // 2) Loop through each linked user
   for (const { user_id, telegram_chat_id } of telegramUsers) {
-  
-    // load prefs
+    // 2a) Load user prefs (only filter on user’s personal prefs — NOT setup logic)
     const { data: prefs, error: prefsError } = await supabase
       .from("user_alerts")
       .select("telegram, symbols, timeframes, tiers")
       .eq("user_id", user_id)
       .single();
+
     if (prefsError || !prefs?.telegram) continue;
-  
-    const { symbols = [], timeframes = [], tiers = [] } = prefs;
-    if (
-      (symbols.length    && !symbols.includes(signal.symbol))    ||
-      (timeframes.length && !timeframes.includes(signal.timeframe)) ||
-      (tiers.length      && !tiers.includes(signal.tier))
-    ) continue;
-  
-    // ✅ only now record + send alert
-    const { error: dupError } = await supabase
+
+    const symbols    = (prefs.symbols    || []).map(String);
+    const timeframes = (prefs.timeframes || []).map(String);
+    const tiers      = (prefs.tiers      || []).map(String);
+
+    if ((symbols.length    && !symbols.includes(sigSymbol)) ||
+        (timeframes.length && !timeframes.includes(sigTimeframe)) ||
+        (tiers.length      && !tiers.includes(sigTier))) {
+      continue;
+    }
+
+    // 2b) Idempotency: skip if we've already sent this ENTRY for this user
+    const { data: existing, error: existErr } = await supabase
       .from("sent_telegram_alerts")
-      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY" });
-    if (dupError) continue;
-  
+      .select("id")
+      .eq("uid", signal.uid)
+      .eq("user_id", user_id)
+      .eq("alert_type", "ENTRY")
+      .limit(1);
+
+    if (!existErr && existing?.length) {
+      // already sent to this user
+      continue;
+    }
+
+    // 2c) Record first (so a crash still prevents dupes next loop)
+    const { error: insertErr } = await supabase
+      .from("sent_telegram_alerts")
+      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY", success: true });
+
+    if (insertErr) {
+      // if you add a unique index, conflict shows up here; just skip
+      console.warn("⚠️ Insert duplicate or error, skipping send:", insertErr?.message);
+      continue;
+    }
+
+    // 2d) Send message — no Markdown parsing to avoid accidental formatting breaks
     try {
-      const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
-      await bot.sendMessage(telegram_chat_id, text, { parse_mode: "Markdown" });
+      const text = `🟣 ${signal.telegramTitle}\n\n${signal.telegramBody}`;
+      await bot.sendMessage(telegram_chat_id, text); // ← removed parse_mode
       console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
     } catch (err) {
       console.error(`🚫 Failed to send initial alert to ${telegram_chat_id}:`, err);
+
+      // Optional: mark failed send in DB
+      await supabase
+        .from("sent_telegram_alerts")
+        .update({ success: false })
+        .eq("uid", signal.uid)
+        .eq("user_id", user_id)
+        .eq("alert_type", "ENTRY");
     }
   }
 }
@@ -714,62 +752,86 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
   }
 });
 
-// ✅ Bulletproof: Reject rogue payloads (like ones with Median)
+// ✅ Bulletproof: Reject rogue payloads (like ones with "median")
 app.post("/api/send-signal", async (req, res) => {
-  const { uid, telegramTitle, telegramBody } = req.body;
+  const { uid, telegramTitle, telegramBody, symbol, timeframe, tier } = req.body || {};
 
-  console.log("🔔 /api/send-signal hit");
-  console.log("UID:             ", uid);
-  console.log("Title:           ", telegramTitle);
-  console.log("Body:            ", telegramBody);
+  // (optional) super-simple shared secret; set QTX_NOTIFY_KEY in env if you want it
+  if (process.env.QTX_NOTIFY_KEY) {
+    const k = req.get("X-QTX-Notify-Key") || "";
+    if (k !== process.env.QTX_NOTIFY_KEY) {
+      console.warn("🚫 Unauthorized send-signal (bad key)");
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+  }
 
-  const includesMedian = telegramBody?.toLowerCase().includes("median") || false;
-  console.log("Includes Median: ", includesMedian);
-  console.log("Source IP:       ", req.headers["x-forwarded-for"]);
-  console.log("User-Agent:      ", req.headers["user-agent"]);
-  console.log("Referer:         ", req.headers["referer"]);
-  console.log("Timestamp:       ", new Date().toISOString());
-  console.log("Headers:         ", req.headers);
+  // Basic validation — we only relay if the browser already formatted title/body
+  if (!uid || !telegramTitle || !telegramBody) {
+    console.warn("⚠️ Missing uid/title/body — skipping relay");
+    return res.status(400).json({ ok: false, error: "missing fields" });
+  }
 
-  // 🚫 Hard block if any payload contains "Median" (from legacy or rogue sources)
-  if (includesMedian) {
+  console.log("🔔 /api/send-signal hit", { uid, symbol, timeframe, tier });
+
+  // 🚫 Hard block if any payload contains "median" (legacy/rogue sources)
+  const hasMedian = (typeof telegramBody === "string") && telegramBody.toLowerCase().includes("median");
+  if (hasMedian) {
     console.warn("🚨 BLOCKED: telegramBody includes 'median' — unauthorized payload");
-    console.trace("📍 Trace for blocked Median payload");
-    return res.status(200).json({ blocked: true });
+    return res.status(200).json({ ok: false, blocked: true, reason: "contains 'median'" });
   }
 
   try {
-    await sendTelegramAlertsForSignal(req.body);
-    console.log("✅ Alert sent for UID:", uid);
+    await sendTelegramAlertsForSignal({ uid, telegramTitle, telegramBody, symbol, timeframe, tier });
+    console.log("✅ Alert relayed for UID:", uid);
+    return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("❌ Error sending alert for UID:", uid, err);
+    return res.status(500).json({ ok: false, error: "server error" });
   }
-
-  res.sendStatus(200);
 });
 
 // In-memory dedup cache for follow-up alerts
 const sentFollowUpCache = new Set();
 const FOLLOWUP_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
+// Allowed follow-up types to avoid rogue posts
+const ALLOWED_FOLLOWUP = new Set(["TP1", "TP2", "SL", "AUTO_CLOSE"]);
+
 app.post("/api/send-followup-alert", async (req, res) => {
-  const { uid, symbol, timeframe, setup, tier, type, pnl, time } = req.body;
-  console.log("📣 Follow-up alert received:", req.body);
+  // (optional) super-simple shared secret – only active if you set env
+  if (process.env.QTX_NOTIFY_KEY) {
+    const k = req.get("X-QTX-Notify-Key") || "";
+    if (k !== process.env.QTX_NOTIFY_KEY) {
+      console.warn("🚫 Unauthorized follow-up (bad key)");
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+  }
+
+  const { uid, symbol, timeframe, setup, tier, type, pnl, time } = req.body || {};
+  console.log("📣 Follow-up alert received:", { uid, symbol, timeframe, setup, tier, type, pnl, time });
+
+  // 0) Basic validation & normalization
+  if (!uid || !symbol || !timeframe || !type) {
+    return res.status(400).json({ ok: false, error: "missing fields" });
+  }
+  const TYPE = String(type).trim().toUpperCase();
+  if (!ALLOWED_FOLLOWUP.has(TYPE)) {
+    console.warn("⚠️ Unknown follow-up type:", TYPE);
+    return res.status(400).json({ ok: false, error: "invalid type" });
+  }
 
   try {
-    const followUpKey = `${uid}|${type.trim().toUpperCase()}`;
+    const followUpKey = `${uid}|${TYPE}`;
 
     // 🚫 In-memory dedup check
     if (sentFollowUpCache.has(followUpKey)) {
-      console.warn(`⏭️ Skipping duplicate follow-up alert: ${followUpKey}`);
-      return res.status(200).json({ skipped: true, reason: "duplicate" });
+      console.warn(`⏭️ Skipping duplicate follow-up: ${followUpKey}`);
+      return res.status(200).json({ ok: true, skipped: true, reason: "duplicate (cache)" });
     }
-
-    // Add to in-memory cache & schedule removal
     sentFollowUpCache.add(followUpKey);
     setTimeout(() => sentFollowUpCache.delete(followUpKey), FOLLOWUP_CACHE_TTL);
 
-    // 1) Find users who got the original entry alert
+    // 1) Find users who got the original ENTRY alert (keeps parity with Desktop)
     const { data: recipients, error: recError } = await supabase
       .from("sent_telegram_alerts")
       .select("user_id")
@@ -778,30 +840,37 @@ app.post("/api/send-followup-alert", async (req, res) => {
 
     if (recError) {
       console.error("❌ Error fetching recipients:", recError);
-      return res.status(500).json({ error: "DB error" });
+      return res.status(500).json({ ok: false, error: "db error" });
     }
-    if (!recipients.length) {
+    if (!recipients?.length) {
       console.log("⚠️ No users found for initial alert:", uid);
-      return res.status(200).json({ message: "No recipients" });
+      return res.status(200).json({ ok: true, message: "no recipients" });
     }
 
-    // 2) Prepare message
+    // 2) Prepare message (plain text to avoid Markdown surprises)
     const formattedTime = time
       ? new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" })
       : "Unknown time";
-    const tierLabel = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "—";    
-    const message = `🔁 *${type} Update* for *${symbol}* ${timeframe}min • *${tierLabel}*
-    Setup: Opposite to ${setup}
-    PnL: ${pnl?.toFixed(2)}%
-    Time: ${formattedTime}`;
+    const tfMins = parseInt(timeframe, 10) || 0;
+    const tfLabel = tfMins >= 1440 ? `${Math.round(tfMins / 1440)}d`
+                 : tfMins >= 60   ? `${Math.round(tfMins / 60)}h`
+                                  : `${tfMins}m`;
+    const tierLabel = tier ? String(tier)[0].toUpperCase() + String(tier).slice(1) : "—";
+    const pnlStr = typeof pnl === "number" ? `${pnl.toFixed(2)}%` : "—";
+
+    const message =
+`🔁 ${TYPE} Update • ${symbol} ${tfLabel} • Tier: ${tierLabel}
+Setup: Opposite to ${setup || "—"}
+PnL: ${pnlStr}
+Time: ${formattedTime}`;
 
     // 3) Loop over recipients
     for (const { user_id } of recipients) {
-      // DB dedup: avoid re-sending to same user
+      // DB dedup: ensure we only ever send once per (uid, user, TYPE)
       const { error: upError } = await supabase
         .from("sent_telegram_alerts")
         .upsert(
-          { uid, user_id, alert_type: type.trim().toUpperCase() },
+          { uid, user_id, alert_type: TYPE, success: true },
           { onConflict: ['uid', 'user_id', 'alert_type'] }
         );
       if (upError) {
@@ -809,7 +878,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
         continue;
       }
 
-      // Check prefs
+      // Check user prefs (cast lists to string for safe includes)
       const { data: prefs, error: prefsError } = await supabase
         .from("user_alerts")
         .select("telegram, symbols, timeframes, tiers")
@@ -817,12 +886,17 @@ app.post("/api/send-followup-alert", async (req, res) => {
         .single();
       if (prefsError || !prefs?.telegram) continue;
 
-      const { symbols = [], timeframes = [], tiers: allowedTiers = [] } = prefs;
-      if (
-        (symbols.length    && !symbols.includes(symbol))    ||
-        (timeframes.length && !timeframes.includes(timeframe)) ||
-        (allowedTiers.length && !allowedTiers.includes(tier))
-      ) {
+      const symbolsList    = (prefs.symbols    || []).map(String);
+      const timeframesList = (prefs.timeframes || []).map(String);
+      const tiersList      = (prefs.tiers      || []).map(String);
+
+      const sigSymbol    = String(symbol);
+      const sigTimeframe = String(timeframe);
+      const sigTier      = tier != null ? String(tier) : "";
+
+      if ((symbolsList.length    && !symbolsList.includes(sigSymbol)) ||
+          (timeframesList.length && !timeframesList.includes(sigTimeframe)) ||
+          (tiersList.length      && !tiersList.includes(sigTier))) {
         continue;
       }
 
@@ -835,19 +909,26 @@ app.post("/api/send-followup-alert", async (req, res) => {
         .single();
       if (linkError || !link) continue;
 
-      // Send message
+      // Send message (no parse_mode)
       try {
-        await bot.sendMessage(link.telegram_chat_id, message, { parse_mode: "Markdown" });
-        console.log(`🔔 Follow-up ${type} sent to ${link.telegram_chat_id}`);
+        await bot.sendMessage(link.telegram_chat_id, message);
+        console.log(`🔔 Follow-up ${TYPE} sent to ${link.telegram_chat_id}`);
       } catch (err) {
-        console.error(`🚫 Failed to send follow-up ${type} to ${link.telegram_chat_id}:`, err);
+        console.error(`🚫 Failed to send follow-up ${TYPE} to ${link.telegram_chat_id}:`, err);
+        // Mark failed send if desired
+        await supabase
+          .from("sent_telegram_alerts")
+          .update({ success: false })
+          .eq("uid", uid)
+          .eq("user_id", user_id)
+          .eq("alert_type", TYPE);
       }
     }
 
-    res.json({ success: true });
+    res.json({ ok: true });
   } catch (err) {
     console.error("❌ Error in follow-up alert handler:", err);
-    res.status(500).json({ error: "Internal error" });
+    res.status(500).json({ ok: false, error: "internal error" });
   }
 });
 
