@@ -790,145 +790,97 @@ app.post("/api/send-signal", async (req, res) => {
   }
 });
 
-// In-memory dedup cache for follow-up alerts
 const sentFollowUpCache = new Set();
 const FOLLOWUP_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
-// Allowed follow-up types to avoid rogue posts
-const ALLOWED_FOLLOWUP = new Set(["TP1", "TP2", "SL", "AUTO_CLOSE"]);
-
 app.post("/api/send-followup-alert", async (req, res) => {
-  // (optional) super-simple shared secret – only active if you set env
+  const {
+    uid, symbol, timeframe, setup, setup_type, tier,
+    typeKey, label, telegramTitle, telegramBody, pnl, time
+  } = req.body || {};
+
+  // (optional) simple header key if you enabled it for /api/send-signal
   if (process.env.QTX_NOTIFY_KEY) {
     const k = req.get("X-QTX-Notify-Key") || "";
     if (k !== process.env.QTX_NOTIFY_KEY) {
-      console.warn("🚫 Unauthorized follow-up (bad key)");
-      return res.status(401).json({ ok: false, error: "unauthorized" });
+      return res.status(401).json({ ok:false, error:"unauthorized" });
     }
   }
 
-  const { uid, symbol, timeframe, setup, tier, type, pnl, time } = req.body || {};
-  console.log("📣 Follow-up alert received:", { uid, symbol, timeframe, setup, tier, type, pnl, time });
+  if (!uid || !typeKey || !telegramTitle || !telegramBody) {
+    return res.status(400).json({ ok:false, error:"missing fields" });
+  }
 
-  // 0) Basic validation & normalization
-  if (!uid || !symbol || !timeframe || !type) {
-    return res.status(400).json({ ok: false, error: "missing fields" });
+  // in-memory dedupe for quick repeats
+  const followUpKey = `${uid}|${typeKey}`;
+  if (sentFollowUpCache.has(followUpKey)) {
+    return res.status(200).json({ ok:true, skipped:true, reason:"duplicate (cache)" });
   }
-  const TYPE = String(type).trim().toUpperCase();
-  if (!ALLOWED_FOLLOWUP.has(TYPE)) {
-    console.warn("⚠️ Unknown follow-up type:", TYPE);
-    return res.status(400).json({ ok: false, error: "invalid type" });
-  }
+  sentFollowUpCache.add(followUpKey);
+  setTimeout(() => sentFollowUpCache.delete(followUpKey), FOLLOWUP_CACHE_TTL);
 
   try {
-    const followUpKey = `${uid}|${TYPE}`;
-
-    // 🚫 In-memory dedup check
-    if (sentFollowUpCache.has(followUpKey)) {
-      console.warn(`⏭️ Skipping duplicate follow-up: ${followUpKey}`);
-      return res.status(200).json({ ok: true, skipped: true, reason: "duplicate (cache)" });
-    }
-    sentFollowUpCache.add(followUpKey);
-    setTimeout(() => sentFollowUpCache.delete(followUpKey), FOLLOWUP_CACHE_TTL);
-
-    // 1) Find users who got the original ENTRY alert (keeps parity with Desktop)
+    // Get users who received ENTRY (keeps parity with Desktop)
     const { data: recipients, error: recError } = await supabase
       .from("sent_telegram_alerts")
       .select("user_id")
       .eq("uid", uid)
       .eq("alert_type", "ENTRY");
 
-    if (recError) {
-      console.error("❌ Error fetching recipients:", recError);
-      return res.status(500).json({ ok: false, error: "db error" });
-    }
-    if (!recipients?.length) {
-      console.log("⚠️ No users found for initial alert:", uid);
-      return res.status(200).json({ ok: true, message: "no recipients" });
-    }
+    if (recError) return res.status(500).json({ ok:false, error:"db error" });
+    if (!recipients?.length) return res.status(200).json({ ok:true, message:"no recipients" });
 
-    // 2) Prepare message (plain text to avoid Markdown surprises)
-    const formattedTime = time
-      ? new Date(time).toLocaleString("en-US", { timeZone: "America/New_York" })
-      : "Unknown time";
-    const tfMins = parseInt(timeframe, 10) || 0;
-    const tfLabel = tfMins >= 1440 ? `${Math.round(tfMins / 1440)}d`
-                 : tfMins >= 60   ? `${Math.round(tfMins / 60)}h`
-                                  : `${tfMins}m`;
-    const tierLabel = tier ? String(tier)[0].toUpperCase() + String(tier).slice(1) : "—";
-    const pnlStr = typeof pnl === "number" ? `${pnl.toFixed(2)}%` : "—";
-
-    const message =
-`🔁 ${TYPE} Update • ${symbol} ${tfLabel} • Tier: ${tierLabel}
-Setup: Opposite to ${setup || "—"}
-PnL: ${pnlStr}
-Time: ${formattedTime}`;
-
-    // 3) Loop over recipients
     for (const { user_id } of recipients) {
-      // DB dedup: ensure we only ever send once per (uid, user, TYPE)
-      const { error: upError } = await supabase
-        .from("sent_telegram_alerts")
-        .upsert(
-          { uid, user_id, alert_type: TYPE, success: true },
-          { onConflict: ['uid', 'user_id', 'alert_type'] }
-        );
-      if (upError) {
-        console.error("⚠️ Could not upsert follow-up record:", upError);
-        continue;
-      }
-
-      // Check user prefs (cast lists to string for safe includes)
-      const { data: prefs, error: prefsError } = await supabase
+      // Per-user prefs (string-cast lists to avoid 30 vs "30")
+      const { data: prefs } = await supabase
         .from("user_alerts")
         .select("telegram, symbols, timeframes, tiers")
         .eq("user_id", user_id)
         .single();
-      if (prefsError || !prefs?.telegram) continue;
+      if (!prefs?.telegram) continue;
 
       const symbolsList    = (prefs.symbols    || []).map(String);
       const timeframesList = (prefs.timeframes || []).map(String);
       const tiersList      = (prefs.tiers      || []).map(String);
 
-      const sigSymbol    = String(symbol);
-      const sigTimeframe = String(timeframe);
-      const sigTier      = tier != null ? String(tier) : "";
-
-      if ((symbolsList.length    && !symbolsList.includes(sigSymbol)) ||
-          (timeframesList.length && !timeframesList.includes(sigTimeframe)) ||
-          (tiersList.length      && !tiersList.includes(sigTier))) {
+      if ((symbolsList.length    && !symbolsList.includes(String(symbol))) ||
+          (timeframesList.length && !timeframesList.includes(String(timeframe))) ||
+          (tiersList.length      && !tiersList.includes(String(tier ?? "")))) {
         continue;
       }
 
-      // Get Telegram chat ID
-      const { data: link, error: linkError } = await supabase
+      // DB dedupe: only once per (uid, user, typeKey)
+      const { error: upErr } = await supabase
+        .from("sent_telegram_alerts")
+        .upsert(
+          { uid, user_id, alert_type: typeKey, success: true },
+          { onConflict: ['uid', 'user_id', 'alert_type'] }
+        );
+      if (upErr) continue;
+
+      // find chat id
+      const { data: link } = await supabase
         .from("telegram_links")
         .select("telegram_chat_id")
         .eq("user_id", user_id)
         .eq("verified", true)
         .single();
-      if (linkError || !link) continue;
+      if (!link?.telegram_chat_id) continue;
 
-      // Send message (no parse_mode)
+      // Send exactly what desktop showed
       try {
-        await bot.sendMessage(link.telegram_chat_id, message);
-        console.log(`🔔 Follow-up ${TYPE} sent to ${link.telegram_chat_id}`);
+        await bot.sendMessage(link.telegram_chat_id, `🔁 ${telegramTitle}\n\n${telegramBody}`);
       } catch (err) {
-        console.error(`🚫 Failed to send follow-up ${TYPE} to ${link.telegram_chat_id}:`, err);
-        // Mark failed send if desired
-        await supabase
-          .from("sent_telegram_alerts")
+        await supabase.from("sent_telegram_alerts")
           .update({ success: false })
-          .eq("uid", uid)
-          .eq("user_id", user_id)
-          .eq("alert_type", TYPE);
+          .eq("uid", uid).eq("user_id", user_id).eq("alert_type", typeKey);
       }
     }
 
-    res.json({ ok: true });
+    return res.json({ ok:true });
   } catch (err) {
-    console.error("❌ Error in follow-up alert handler:", err);
-    res.status(500).json({ ok: false, error: "internal error" });
+    console.error("follow-up error:", err);
+    return res.status(500).json({ ok:false, error:"internal error" });
   }
 });
 
