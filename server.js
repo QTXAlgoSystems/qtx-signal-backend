@@ -60,9 +60,9 @@ app.get("/api/check-telegram-status", async (req, res) => {
   }
 });
 
-// Keep as the ONLY path that sends Telegram
+// REPLACE ENTIRE FUNCTION WITH THIS
 async function sendTelegramAlertsForSignal(signal) {
-  console.log("📦 Incoming signal for Telegram:", signal.uid);
+  console.log("📦 Incoming signal for Telegram:", signal?.uid);
 
   // 0) Trust the frontend decision: must have title/body AND FE key
   if (!signal?.telegramBody || !signal?.telegramTitle || !signal?.key) {
@@ -81,25 +81,29 @@ async function sendTelegramAlertsForSignal(signal) {
     .select("user_id, telegram_chat_id")
     .eq("verified", true);
 
-  if (linkError || !telegramUsers?.length) {
-    console.error("❌ Failed to fetch telegram_links or none found:", linkError);
+  if (linkError) {
+    console.error("❌ Failed to fetch telegram_links:", linkError);
+    return;
+  }
+  if (!telegramUsers?.length) {
+    console.warn("ℹ️ No verified telegram links found");
     return;
   }
 
-  // 1.1) OPTIONAL: Global idempotency by FE key (one-time guard)
-  // Create a table with UNIQUE(key) or add 'key' column to sent_telegram_alerts with a unique index.
-  const { error: keyInsertErr } = await supabase
-    .from("sent_telegram_alerts_keys")  // <- make this table with columns: key TEXT PRIMARY KEY, created_at TIMESTAMP DEFAULT now()
-    .insert({ key: signal.key });
-
-  if (keyInsertErr && keyInsertErr.code !== "23505") {
-    console.warn("⚠️ Global key insert failed:", keyInsertErr?.message);
-    // Continue — we'll still dedupe per user below
-  }
-  if (keyInsertErr && keyInsertErr.code === "23505") {
-    console.log("🔁 Duplicate FE key — already processed:", signal.key);
-    // You can return here to skip per-user loop entirely if you like:
-    // return;
+  // 1.1) OPTIONAL: Global idempotency by FE key (one-time guard).
+  // If the table doesn't exist yet, this will fail—log and continue.
+  try {
+    const { error: keyInsertErr } = await supabase
+      .from("sent_telegram_alerts_keys") // columns: key TEXT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now()
+      .insert({ key: signal.key });
+    if (keyInsertErr && keyInsertErr.code === "23505") {
+      console.log("🔁 Duplicate FE key — already processed:", signal.key);
+      // You may 'return' here to skip the per-user loop entirely if desired.
+    } else if (keyInsertErr) {
+      console.warn("⚠️ Global key insert failed (continuing):", keyInsertErr?.message);
+    }
+  } catch (e) {
+    console.warn("⚠️ Global key insert threw (continuing):", e?.message || e);
   }
 
   // 2) Loop through each linked user
@@ -111,7 +115,11 @@ async function sendTelegramAlertsForSignal(signal) {
       .eq("user_id", user_id)
       .single();
 
-    if (prefsError || !prefs?.telegram) continue;
+    if (prefsError) {
+      console.warn("⚠️ Prefs fetch error for user", user_id, prefsError?.message);
+      continue;
+    }
+    if (!prefs?.telegram) continue;
 
     const symbols    = (prefs.symbols    || []).map(String);
     const timeframes = (prefs.timeframes || []).map(String);
@@ -123,47 +131,48 @@ async function sendTelegramAlertsForSignal(signal) {
       continue;
     }
 
-    // 2b) Per-user idempotency by FE key
-    const { data: existing, error: existErr } = await supabase
-      .from("sent_telegram_alerts")
-      .select("id")
-      .eq("user_id", user_id)
-      .eq("key", signal.key)           // 🔑 use the FE key, not just uid
-      .eq("alert_type", "ENTRY")
-      .limit(1);
+    // 2b) Per-user idempotency via INSERT with UNIQUE (user_id, uid, alert_type)
+    //    This removes the race from SELECT->INSERT.
+    try {
+      const { error: insertErr } = await supabase
+        .from("sent_telegram_alerts")
+        .insert({
+          uid: signal.uid,
+          user_id,
+          alert_type: "ENTRY",
+          key: signal.key   // stored for audit/debug
+        });
 
-    if (!existErr && existing?.length) {
-      continue; // already sent to this user for this exact FE decision
-    }
-
-    // 2c) Record first (so a crash still prevents dupes next loop)
-    const { error: insertErr } = await supabase
-      .from("sent_telegram_alerts")
-      .insert({
-        uid: signal.uid,
-        user_id,
-        alert_type: "ENTRY",
-        key: signal.key               // 🔑 store the key
-      });
-
-    if (insertErr) {
-      console.warn("⚠️ Insert duplicate or error, skipping send:", insertErr?.message);
+      if (insertErr) {
+        // If you created a UNIQUE index on (user_id, uid, alert_type),
+        // duplicates will land here; skip sending for those.
+        if (String(insertErr.code) === "23505" || /duplicate/i.test(insertErr.message || "")) {
+          console.log("🔁 Duplicate entry (skip send)", { user_id, uid: signal.uid });
+          continue;
+        }
+        console.warn("⚠️ Insert failed (skip send)", { user_id, uid: signal.uid, err: insertErr?.message });
+        continue;
+      }
+    } catch (e) {
+      console.warn("⚠️ Insert threw (skip send)", { user_id, uid: signal.uid, err: e?.message || e });
       continue;
     }
 
-    // 2d) Send exactly what FE chose — no extra emoji, no parse_mode surprises
+    // 2c) Send exactly what FE chose — no parse_mode surprises
     try {
       const text = `${signal.telegramTitle}\n\n${signal.telegramBody}`;
       await bot.sendMessage(telegram_chat_id, text);
-      console.log(`🔔 Initial alert sent to ${telegram_chat_id}`);
+      console.log("🔔 Initial alert sent", { chat_id: telegram_chat_id, uid: signal.uid });
     } catch (err) {
-      console.error(`🚫 Failed to send initial alert to ${telegram_chat_id}:`, err);
-      // Optional: flag failure
+      const tgBody = err?.response?.body ? ` | tg=${JSON.stringify(err.response.body)}` : "";
+      console.error(`🚫 Failed to send initial`, { chat_id: telegram_chat_id, uid: signal.uid }, tgBody);
+
+      // Optional: flag failure for this user/uid/type
       await supabase
         .from("sent_telegram_alerts")
-        .update({ /* success: false */ })
+        .update({ success: false })
         .eq("user_id", user_id)
-        .eq("key", signal.key)
+        .eq("uid", signal.uid)
         .eq("alert_type", "ENTRY");
     }
   }
@@ -804,6 +813,7 @@ app.post("/api/send-signal", async (req, res) => {
   }
 });
 
+// REPLACE ENTIRE FOLLOW-UP ROUTE WITH THIS
 const sentFollowUpCache = new Set();
 const FOLLOWUP_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
 
@@ -813,7 +823,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
     typeKey, label, telegramTitle, telegramBody, pnl, time
   } = req.body || {};
 
-  // (optional) simple header key if you enabled it for /api/send-signal
+  // 🔐 Auth (same as initial)
   if (process.env.QTX_NOTIFY_KEY) {
     const k = req.get("X-QTX-Notify-Key") || "";
     if (k !== process.env.QTX_NOTIFY_KEY) {
@@ -825,7 +835,7 @@ app.post("/api/send-followup-alert", async (req, res) => {
     return res.status(400).json({ ok:false, error:"missing fields" });
   }
 
-  // in-memory dedupe for quick repeats
+  // 🚫 quick in-memory dedupe (burst guard; DB is the real dedupe)
   const followUpKey = `${uid}|${typeKey}`;
   if (sentFollowUpCache.has(followUpKey)) {
     return res.status(200).json({ ok:true, skipped:true, reason:"duplicate (cache)" });
@@ -834,24 +844,53 @@ app.post("/api/send-followup-alert", async (req, res) => {
   setTimeout(() => sentFollowUpCache.delete(followUpKey), FOLLOWUP_CACHE_TTL);
 
   try {
-    // Get users who received ENTRY (keeps parity with Desktop)
+    // 1) Only send to users who received the ENTRY for this uid
     const { data: recipients, error: recError } = await supabase
       .from("sent_telegram_alerts")
       .select("user_id")
       .eq("uid", uid)
       .eq("alert_type", "ENTRY");
 
-    if (recError) return res.status(500).json({ ok:false, error:"db error" });
-    if (!recipients?.length) return res.status(200).json({ ok:true, message:"no recipients" });
+    if (recError) {
+      console.error("❌ follow-up recipients query error:", recError);
+      return res.status(500).json({ ok:false, error:"db error" });
+    }
+    if (!recipients?.length) {
+      console.log("ℹ️ follow-up: no recipients for uid (no ENTRY rows)", { uid, typeKey });
+      return res.status(200).json({ ok:true, message:"no recipients" });
+    }
 
+    // 2) Canonicalize PnL formatting once, to exactly match desktop style (two decimals + %)
+    const pnlNum = (typeof pnl === "number" && isFinite(pnl)) ? pnl : null;
+    const pnlText = (pnlNum === null) ? null : `${pnlNum.toFixed(2)}%`;
+
+    // 3) Builder that injects/replaces the PnL portion safely
+    function buildFollowUpText() {
+      const header = `🔁 ${telegramTitle}`;
+      let body = String(telegramBody || "");
+
+      if (pnlText) {
+        // Replace any existing "PnL: ..." token (e.g., from the browser)
+        const replaced = body.replace(/PnL:\s*([+\-]?\d+(\.\d+)?)%/i, `PnL: ${pnlText}`);
+        if (replaced !== body) {
+          body = replaced;
+        } else {
+          // No PnL token to replace — append a clean line
+          body = `${body}\nPnL: ${pnlText}`;
+        }
+      }
+      return `${header}\n\n${body}`.trim();
+    }
+
+    // 4) For each recipient, enforce per-user dedupe and send
     for (const { user_id } of recipients) {
-      // Per-user prefs (string-cast lists to avoid 30 vs "30")
-      const { data: prefs } = await supabase
+      // a) User prefs
+      const { data: prefs, error: prefsErr } = await supabase
         .from("user_alerts")
         .select("telegram, symbols, timeframes, tiers")
         .eq("user_id", user_id)
         .single();
-      if (!prefs?.telegram) continue;
+      if (prefsErr || !prefs?.telegram) continue;
 
       const symbolsList    = (prefs.symbols    || []).map(String);
       const timeframesList = (prefs.timeframes || []).map(String);
@@ -863,37 +902,46 @@ app.post("/api/send-followup-alert", async (req, res) => {
         continue;
       }
 
-      // DB dedupe: only once per (uid, user, typeKey)
+      // b) DB dedupe per (uid, user, typeKey)
       const { error: upErr } = await supabase
         .from("sent_telegram_alerts")
         .upsert(
           { uid, user_id, alert_type: typeKey },
           { onConflict: ['uid','user_id','alert_type'] }
         );
-      if (upErr) continue;
+      if (upErr) {
+        console.warn("⚠️ follow-up upsert failed; skip send", { uid, user_id, typeKey, err: upErr?.message });
+        continue;
+      }
 
-      // find chat id
-      const { data: link } = await supabase
+      // c) Chat id
+      const { data: link, error: linkErr } = await supabase
         .from("telegram_links")
         .select("telegram_chat_id")
         .eq("user_id", user_id)
         .eq("verified", true)
         .single();
-      if (!link?.telegram_chat_id) continue;
+      if (linkErr || !link?.telegram_chat_id) continue;
 
-      // Send exactly what desktop showed
+      // d) Send (with canonical PnL)
+      const text = buildFollowUpText();
       try {
-        await bot.sendMessage(link.telegram_chat_id, `🔁 ${telegramTitle}\n\n${telegramBody}`);
+        await bot.sendMessage(link.telegram_chat_id, text);
+        console.log("🔔 follow-up sent", { chat_id: link.telegram_chat_id, uid, typeKey, pnl: pnlText ?? "n/a" });
       } catch (err) {
-        await supabase.from("sent_telegram_alerts")
-          .update({})
+        const tgBody = err?.response?.body ? ` | tg=${JSON.stringify(err.response.body)}` : "";
+        console.error(`🚫 follow-up send failed`, { chat_id: link.telegram_chat_id, uid, typeKey }, tgBody);
+
+        await supabase
+          .from("sent_telegram_alerts")
+          .update({ success: false })
           .eq("uid", uid).eq("user_id", user_id).eq("alert_type", typeKey);
       }
     }
 
     return res.json({ ok:true });
   } catch (err) {
-    console.error("follow-up error:", err);
+    console.error("❌ follow-up route error:", err);
     return res.status(500).json({ ok:false, error:"internal error" });
   }
 });
