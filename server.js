@@ -124,7 +124,7 @@ async function sendTelegramAlertsForSignal(signal) {
     // 2c) Record first (so a crash still prevents dupes next loop)
     const { error: insertErr } = await supabase
       .from("sent_telegram_alerts")
-      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY", success: true });
+      .insert({ uid: signal.uid, user_id, alert_type: "ENTRY" });
 
     if (insertErr) {
       // if you add a unique index, conflict shows up here; just skip
@@ -143,7 +143,7 @@ async function sendTelegramAlertsForSignal(signal) {
       // Optional: mark failed send in DB
       await supabase
         .from("sent_telegram_alerts")
-        .update({ success: false })
+        .update({ /* success: false */ })
         .eq("uid", signal.uid)
         .eq("user_id", user_id)
         .eq("alert_type", "ENTRY");
@@ -853,8 +853,8 @@ app.post("/api/send-followup-alert", async (req, res) => {
       const { error: upErr } = await supabase
         .from("sent_telegram_alerts")
         .upsert(
-          { uid, user_id, alert_type: typeKey, success: true },
-          { onConflict: ['uid', 'user_id', 'alert_type'] }
+          { uid, user_id, alert_type: typeKey },
+          { onConflict: ['uid','user_id','alert_type'] }
         );
       if (upErr) continue;
 
