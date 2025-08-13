@@ -800,6 +800,7 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
 });
 
 app.post("/api/send-signal", async (req, res) => {
+  console.log("🚨 /api/send-signal received:", req.body);
   const { uid, key, telegramTitle, telegramBody, symbol, timeframe, tier } = req.body || {};
 
   if (!uid || !key || !telegramTitle || !telegramBody) {      // ← require key
