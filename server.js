@@ -880,14 +880,12 @@ app.post("/api/send-followup-alert", async (req, res) => {
       let body = String(telegramBody || "");
 
       if (pnlText) {
-        // Replace any existing "PnL: ..." token (e.g., from the browser)
+        // Only replace if PnL is present; otherwise do not append again
         const replaced = body.replace(/PnL:\s*([+\-]?\d+(\.\d+)?)%/i, `PnL: ${pnlText}`);
         if (replaced !== body) {
           body = replaced;
-        } else {
-          // No PnL token to replace — append a clean line
-          body = `${body}\nPnL: ${pnlText}`;
         }
+        // 🔥 Remove the else block so it doesn't append again
       }
       return `${header}\n\n${body}`.trim();
     }
