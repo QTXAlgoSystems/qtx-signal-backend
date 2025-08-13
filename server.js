@@ -60,6 +60,18 @@ app.get("/api/check-telegram-status", async (req, res) => {
   }
 });
 
+// Normalizes tier values so numbers or labels both match
+function normalizeTierValue(v) {
+  if (v == null) return null;
+  const s = String(v).trim().toLowerCase();
+  if (["0","1","2","3","4"].includes(s)) return s; // numbers as strings
+  if (s === "good")  return "1";
+  if (s === "great") return "2";
+  if (s === "elite") return "3";
+  if (s === "god")   return "4";
+  return s;
+}
+
 // REPLACE ENTIRE FUNCTION WITH THIS
 async function sendTelegramAlertsForSignal(signal) {
   console.log("📦 Incoming signal for Telegram:", signal?.uid);
@@ -72,8 +84,8 @@ async function sendTelegramAlertsForSignal(signal) {
 
   // 0.1) Normalize for user prefs checks only (NOT for deciding)
   const sigSymbol    = String(signal.symbol || "").trim();
-  const sigTimeframe = String(signal.timeframe || "").trim();
-  const sigTier      = String(signal.tier ?? "").trim(); // tier is just for user filters
+  const sigTimeframe = String(signal.timeframe ?? "").trim();       // ensure string
+  const sigTier      = normalizeTierValue(signal.tier);             // "1".."4"
 
   // 1) Fetch all verified Telegram links
   const { data: telegramUsers, error: linkError } = await supabase
@@ -121,13 +133,21 @@ async function sendTelegramAlertsForSignal(signal) {
     }
     if (!prefs?.telegram) continue;
 
-    const symbols    = (prefs.symbols    || []).map(String);
-    const timeframes = (prefs.timeframes || []).map(String);
-    const tiers      = (prefs.tiers      || []).map(String);
-
-    if ((symbols.length    && !symbols.includes(sigSymbol)) ||
-        (timeframes.length && !timeframes.includes(sigTimeframe)) ||
-        (tiers.length      && !tiers.includes(sigTier))) {
+    const symbols    = (prefs.symbols    || []).map(v => String(v).trim());
+    const timeframes = (prefs.timeframes || []).map(v => String(v).trim());
+    const tiers      = (prefs.tiers      || []).map(normalizeTierValue);
+    
+    const symbolOK = !symbols.length    || symbols.includes(sigSymbol);
+    const tfOK     = !timeframes.length || timeframes.includes(sigTimeframe);
+    const tierOK   = !tiers.length      || tiers.includes(sigTier);
+    
+    if (!(symbolOK && tfOK && tierOK)) {
+      console.log("🔎 Prefs mismatch — skipping user", {
+        user_id,
+        sig: { symbol: sigSymbol, timeframe: sigTimeframe, tier: sigTier },
+        prefs: { symbols, timeframes, tiers },
+        ok: { symbolOK, tfOK, tierOK }
+      });
       continue;
     }
 
@@ -819,6 +839,11 @@ app.post("/api/send-followup-alert", async (req, res) => {
     return res.status(400).json({ ok:false, error:"missing fields" });
   }
 
+  // 🔹 Normalize incoming values for prefs comparison
+  const sigSym  = String(symbol || "").trim();
+  const sigTf   = String(timeframe ?? "").trim();
+  const sigTier = normalizeTierValue(tier);
+
   // 🚫 quick in-memory dedupe (burst guard; DB is the real dedupe)
   const followUpKey = `${uid}|${typeKey}`;
   if (sentFollowUpCache.has(followUpKey)) {
@@ -876,16 +901,25 @@ app.post("/api/send-followup-alert", async (req, res) => {
         .single();
       if (prefsErr || !prefs?.telegram) continue;
 
-      const symbolsList    = (prefs.symbols    || []).map(String);
-      const timeframesList = (prefs.timeframes || []).map(String);
-      const tiersList      = (prefs.tiers      || []).map(String);
-
-      if ((symbolsList.length    && !symbolsList.includes(String(symbol))) ||
-          (timeframesList.length && !timeframesList.includes(String(timeframe))) ||
-          (tiersList.length      && !tiersList.includes(String(tier ?? "")))) {
+      const symbolsList    = (prefs.symbols    || []).map(v => String(v).trim());
+      const timeframesList = (prefs.timeframes || []).map(v => String(v).trim());
+      const tiersList      = (prefs.tiers      || []).map(normalizeTierValue);
+      
+      const symbolOK = !symbolsList.length    || symbolsList.includes(sigSym);
+      const tfOK     = !timeframesList.length || timeframesList.includes(sigTf);
+      const tierOK   = !tiersList.length      || tiersList.includes(sigTier);
+      
+      if (!(symbolOK && tfOK && tierOK)) {
+        // Optional debug: comment out later if noisy
+        console.log("🔎 Follow-up prefs mismatch — skipping user", {
+          user_id,
+          sig: { symbol: sigSym, timeframe: sigTf, tier: sigTier },
+          prefs: { symbolsList, timeframesList, tiersList },
+          ok: { symbolOK, tfOK, tierOK }
+        });
         continue;
       }
-
+      
       // b) DB dedupe per (uid, user, typeKey)
       const { error: upErr } = await supabase
         .from("sent_telegram_alerts")
