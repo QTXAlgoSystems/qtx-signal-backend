@@ -782,14 +782,6 @@ bot.onText(/\/start (.+)/, async (msg, match) => {
 app.post("/api/send-signal", async (req, res) => {
   const { uid, key, telegramTitle, telegramBody, symbol, timeframe, tier } = req.body || {};
 
-  if (process.env.QTX_NOTIFY_KEY) {
-    const k = req.get("X-QTX-Notify-Key") || "";
-    if (k !== process.env.QTX_NOTIFY_KEY) {
-      console.warn("🚫 Unauthorized send-signal (bad key)");
-      return res.status(401).json({ ok: false, error: "unauthorized" });
-    }
-  }
-
   if (!uid || !key || !telegramTitle || !telegramBody) {      // ← require key
     console.warn("⚠️ Missing uid/key/title/body — skipping relay");
     return res.status(400).json({ ok: false, error: "missing fields" });
@@ -822,14 +814,6 @@ app.post("/api/send-followup-alert", async (req, res) => {
     uid, symbol, timeframe, setup, setup_type, tier,
     typeKey, label, telegramTitle, telegramBody, pnl, time
   } = req.body || {};
-
-  // 🔐 Auth (same as initial)
-  if (process.env.QTX_NOTIFY_KEY) {
-    const k = req.get("X-QTX-Notify-Key") || "";
-    if (k !== process.env.QTX_NOTIFY_KEY) {
-      return res.status(401).json({ ok:false, error:"unauthorized" });
-    }
-  }
 
   if (!uid || !typeKey || !telegramTitle || !telegramBody) {
     return res.status(400).json({ ok:false, error:"missing fields" });
